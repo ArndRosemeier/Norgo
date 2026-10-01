@@ -133,6 +133,15 @@ const PILLAR_CELL = 38;
 const SPIKE_CELL = 24;
 const SHAFT_CELL = 820;
 const UW_PILLAR_CELL = 120;
+/**
+ * Slope bounds. Simplex noise changes by ~3.3 per unit on average (up to ~7), so a feature
+ * of amplitude A on scale S has slopes around 3.3·A/S. Hills: A ≤ 0.07·S keeps them under
+ * ~22° typically (~33° worst). Mountains: height ≤ 0.25 × ridge scale.
+ */
+const HILL_MAX_RATIO = 0.07;
+const MOUNTAIN_MAX_RATIO = 0.25;
+/** Cell size of the finite canyon placement (m). */
+const CANYON_CELL = 900;
 const LATTICE = 4;
 const NCH = 8; // lattice channels
 
@@ -280,16 +289,41 @@ export class WorldGenerator {
     else h = 4 + (c - 0.07) * 90;
     h = Math.max(h, -160);
 
-    // Mountain ranges (ridged, warped), masked to inland zones.
+    // Mountain ranges, masked to inland zones. Quilez's slope-damped fBm (no ridged or
+    // abs() isolines: those stack into combs of near-vertical fins), sampled at a point
+    // pulled along an erosion field's gradient so crests bunch and drain instead of
+    // repeating at one wavelength (after OrrunWithEngine's surface.rs).
     const rs = p.ridgeScale;
-    const ridge = this.nRidge.ridged2(wx / rs, wz / rs, 5, 2.05, 0.5, p.ridgeSharpness);
     const rangeMask = smoothstep(-0.25, 0.45, this.nRidge.n2(x / (rs * 2.7) + 5.5, z / (rs * 2.7) - 3.3)) * smoothstep(0.02, 0.3, c);
-    const mtn = Math.pow(ridge, 1.6) * rangeMask * P.mountain;
+    let ex = wx, ez = wz;
+    const erodeAmt = rangeMask * Math.min(1, P.mountain);
+    if (erodeAmt > 0.04) {
+      const g = this.erodeTmp;
+      this.nWarp.n2d(wx / 1050 + 71.3, wz / 1050 - 12.9, g);
+      ex += g[1] * (240 / 1050) * erodeAmt;
+      ez += g[2] * (240 / 1050) * erodeAmt;
+      this.nWarp.n2d(ex / 420 - 33.1, ez / 420 + 5.7, g);
+      ex += g[1] * (90 / 420) * erodeAmt;
+      ez += g[2] * (90 / 420) * erodeAmt;
+    }
+    const massif = rangeMask > 0.01 ? saturate(this.nRidge.iqFbm2(ex / rs, ez / rs, 7) * 1.15 + 0.5) : 0;
+    const mtn = Math.pow(massif, 0.6 + 0.5 * p.ridgeSharpness) * rangeMask * P.mountain;
     out.rock = saturate(mtn * 1.6);
-    h += mtn * p.mountainHeight;
+    h += mtn * Math.min(p.mountainHeight, rs * MOUNTAIN_MAX_RATIO);
 
-    // Hills.
-    h += this.nHill.fbm2(wx / P.hillScale, wz / P.hillScale, 4) * P.hillAmp * (0.3 + 0.7 * land);
+    // Hills. Steepness is bounded: the height is capped relative to the wavelength, and finer
+    // octaves add progressively less slope (gain 0.4 × lacunarity 2 < 1). With equal-slope
+    // octaves and per-world multipliers, hills had become fields of near-vertical ridges.
+    // Each biome's hills are evaluated at that biome's own scale and the heights blended:
+    // blending the *scale* sampled the noise at x / S(x), which near biome borders squeezed
+    // it by a factor proportional to |x| — rows of near-vertical fins far from the origin.
+    const hillsOf = (t: TerrainParams) => {
+      const amp = Math.min(t.hillAmp, t.hillScale * HILL_MAX_RATIO);
+      return amp > 0.01 ? this.nHill.iqFbm2(wx / t.hillScale, wz / t.hillScale, 4) * 2 * amp : 0;
+    };
+    const hillsA = hillsOf(ta);
+    const hills = out.blend > 0.001 ? lerp(hillsA, hillsOf(tb), out.blend) : hillsA;
+    h += hills * (0.3 + 0.7 * land);
 
     // Dunes: asymmetric ridges with a dominant wind direction.
     if (P.dune > 0.02) {
@@ -299,20 +333,16 @@ export class WorldGenerator {
       h += (Math.pow(ridgeD, 2.2) * 13 + dune2 * 9) * P.dune * land;
     }
 
-    // Canyons with steep walls.
-    if (P.canyon > 0.02) {
-      const cn = Math.abs(this.nCanyon.fbm2(wx / 900, wz / 900, 2));
-      const width = 0.05 + 0.02 * this.nCanyon.n2(x / 300, z / 300);
-      const k = 1 - smoothstep(width * 0.55, width, cn);
-      h -= k * 55 * P.canyon * p.canyonMul * land;
-    }
+    // Canyons: finite, individually shaped cuts (one per lucky 900 m cell), not the contour
+    // of a noise field — contours run on forever and stack into parallel fins.
+    if (P.canyon > 0.02) h -= this.canyonDepth(wx, wz) * P.canyon * p.canyonMul * land;
 
     // Terraces (mesas).
     if (P.terrace > 0.02) {
       const step = P.terraceStep;
       const t = h / step;
       const f = t - Math.floor(t);
-      const terr = (Math.floor(t) + smoothstep(0.3, 0.7, f)) * step;
+      const terr = (Math.floor(t) + smoothstep(0.12, 0.88, f)) * step;
       h = lerp(h, terr, clamp(P.terrace, 0, 1));
     }
 
@@ -339,16 +369,25 @@ export class WorldGenerator {
     // Fine detail.
     h += this.nDetail.fbm2(x / 28, z / 28, 3) * P.rough;
 
-    // Rivers carve valleys down to slightly below sea level.
-    const rv = Math.abs(this.nRiver.fbm2(wx / 1500, wz / 1500, 3) + this.nRiver.n2(x / 240, z / 240) * 0.03);
-    const rw = 0.012 * p.riverDensity;
-    const bed = 1 - smoothstep(rw * 0.5, rw, rv);
-    const valley = 1 - smoothstep(rw, rw * 6, rv);
-    out.river = bed * land;
-    if (land > 0 && h > -2) {
+    // Rivers: a channel of fixed width in metres, with the land around it capped to rise at
+    // most ~30° from the banks. Carving by noise distance instead (a band of fixed noise
+    // width pulled to a fraction of the height) cut vertical-walled slots through high
+    // ground. Distance to the centre line = |field| / |gradient| (computed near rivers only).
+    const rf = (ax: number, az: number, bx: number, bz: number) => this.nRiver.fbm2(ax / 1500, az / 1500, 3) + this.nRiver.n2(bx / 240, bz / 240) * 0.03;
+    const rsig = rf(wx, wz, x, z);
+    const rv = Math.abs(rsig);
+    out.river = 0;
+    if (land > 0 && h > -2 && rv < 0.25) {
+      const e = 2;
+      const gx = (rf(wx + e, wz, x + e, z) - rsig) / e, gz = (rf(wx, wz + e, x, z + e) - rsig) / e;
+      const dist = rv / Math.max(1e-6, Math.hypot(gx, gz));
+      const halfW = 5 + 5 * p.riverDensity;
       const target = -2.6;
-      const vh = lerp(h, Math.min(h, target + (h - target) * 0.35), valley);
-      h = lerp(vh, Math.min(h, target), bed);
+      const bed = 1 - smoothstep(halfW * 0.55, halfW, dist);
+      out.river = bed * land;
+      // Bank cap: the land may rise from the water at the channel edge at ~30° at most, so a
+      // river cuts a V-valley through high ground and stays a shallow channel on plains.
+      h = Math.min(h, target + Math.max(0, dist - halfW * 0.55) * 0.58);
     }
 
     // Ocean biome blending.
@@ -422,7 +461,43 @@ export class WorldGenerator {
     out.height = h;
   }
 
+  /**
+   * Depth (m, ≥ 0) of the finite canyons around a point. Each 900 m cell may hold one canyon:
+   * a gently bent segment 500–1200 m long with a flat floor, sloped walls and tapered ends.
+   */
+  private canyonDepth(x: number, z: number): number {
+    const cell = CANYON_CELL;
+    const cx0 = Math.floor(x / cell), cz0 = Math.floor(z / cell);
+    let depth = 0;
+    for (let dz = -1; dz <= 1; dz++)
+      for (let dx = -1; dx <= 1; dx++) {
+        const cx = cx0 + dx, cz = cz0 + dz;
+        const hsh = hash2i(this.seed ^ 0x6ca9, cx, cz);
+        if (hashToFloat(hsh) > 0.45) continue;
+        const r = (k: number) => hashToFloat(Math.imul(hsh, 2654435761 + k * 40503) + k * 977);
+        const mx = (cx + 0.2 + r(1) * 0.6) * cell, mz = (cz + 0.2 + r(2) * 0.6) * cell;
+        const ang = r(3) * Math.PI;
+        const half = 250 + r(4) * 350;
+        const halfW = 28 + r(5) * 30;
+        const deep = 32 + r(6) * 26;
+        const bend = (r(7) - 0.5) * 0.6;
+        // Local frame: u along the canyon, v across; a slight bow makes it less ruler-straight.
+        const ux = Math.cos(ang), uz = Math.sin(ang);
+        const lx = x - mx, lz = z - mz;
+        const u = lx * ux + lz * uz;
+        if (Math.abs(u) > half + halfW) continue;
+        const t = u / half;
+        const v = -lx * uz + lz * ux - bend * half * (1 - t * t) + this.nCanyon.n2(x / 140, z / 140) * halfW * 0.25;
+        const across = 1 - smoothstep(halfW * 0.35, halfW, Math.abs(v));
+        if (across <= 0) continue;
+        const along = 1 - smoothstep(0.7, 1.05, Math.abs(t));
+        depth = Math.max(depth, deep * across * along);
+      }
+    return depth;
+  }
+
   private archCache = new Map<number, ArchInfo | null>();
+  private erodeTmp = new Float64Array(3);
 
   /** Sparse natural arches: half tori standing on the ground. */
   private archAt(cx: number, cz: number): ArchInfo | null {

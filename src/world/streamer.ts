@@ -63,6 +63,9 @@ export interface StreamerOptions {
 const tmpBox = new THREE.Box3();
 const tmpSphere = new THREE.Sphere();
 
+/** Chunks disposed per frame at most when trimming the cache (see evict). */
+const EVICT_PER_FRAME = 24;
+
 export class TerrainStreamer {
   readonly root = new THREE.Group();
   readonly events = new Emitter<StreamerEvents>();
@@ -393,12 +396,19 @@ export class TerrainStreamer {
     }
   }
 
+  /**
+   * Trim the chunk cache gradually: start a little below the limit and dispose at most
+   * EVICT_PER_FRAME of the least recently wanted chunks per frame. (Dropping 15 % of the
+   * cache at once disposed hundreds of meshes and their scatter in one 40 ms frame.)
+   */
   private evict() {
-    if (this.entries.size <= this.opts.maxEntries) return;
+    const max = this.opts.maxEntries;
+    if (this.entries.size <= max * 0.9) return;
     const cands = [...this.entries.values()].filter((e) => !e.drawn && e.lastWanted !== this.frame && e.state !== 'pending');
+    if (!cands.length) return;
     cands.sort((a, b) => a.lastWanted - b.lastWanted);
-    const toRemove = this.entries.size - this.opts.maxEntries * 0.85;
-    for (let i = 0; i < Math.min(toRemove, cands.length); i++) this.dispose(cands[i]);
+    const toRemove = Math.min(EVICT_PER_FRAME, this.entries.size - Math.floor(max * 0.85), cands.length);
+    for (let i = 0; i < toRemove; i++) this.dispose(cands[i]);
   }
 
   private dispose(e: ChunkEntry) {

@@ -85,6 +85,67 @@ export class Noise {
     return 99.2 * (n0 + n1 + n2);
   }
 
+  /**
+   * Simplex noise 2D with analytic derivatives: writes [value, d/dx, d/dy] into `out`
+   * (value identical to n2).
+   */
+  n2d(xin: number, yin: number, out: Float64Array | number[]): void {
+    const perm = this.perm;
+    const p12 = this.perm12;
+    const s = (xin + yin) * F2;
+    const i = Math.floor(xin + s);
+    const j = Math.floor(yin + s);
+    const t = (i + j) * G2;
+    const x0 = xin - (i - t);
+    const y0 = yin - (j - t);
+    const i1 = x0 > y0 ? 1 : 0, j1 = 1 - i1;
+    const ii = i & 255, jj = j & 255;
+    let v = 0, dx = 0, dy = 0;
+    const corner = (cx: number, cy: number, gi: number) => {
+      const tt = 0.5 - cx * cx - cy * cy;
+      if (tt <= 0) return;
+      const g = gi * 2;
+      const gd = GRAD2[g] * cx + GRAD2[g + 1] * cy;
+      const t2 = tt * tt, t4 = t2 * t2;
+      v += t4 * gd;
+      const k = -8 * t2 * tt * gd;
+      dx += k * cx + t4 * GRAD2[g];
+      dy += k * cy + t4 * GRAD2[g + 1];
+    };
+    corner(x0, y0, p12[ii + perm[jj]]);
+    corner(x0 - i1 + G2, y0 - j1 + G2, p12[ii + i1 + perm[jj + j1]]);
+    corner(x0 - 1 + 2 * G2, y0 - 1 + 2 * G2, p12[ii + 1 + perm[jj + 1]]);
+    out[0] = 99.2 * v;
+    out[1] = 99.2 * dx;
+    out[2] = 99.2 * dy;
+  }
+
+  /**
+   * Inigo Quilez's terrain fBm (iquilezles.org/articles/morenoise): each octave is damped
+   * by the slope accumulated so far, so detail fades on steep flanks and gathers on
+   * flats and crests — eroded-looking ranges without the fins of ridged/abs noise.
+   * Octaves are rotated against each other to avoid grid alignment. Result ≈ [-1, 1].
+   * `damp` scales how strongly slope suppresses later octaves.
+   */
+  iqFbm2(x: number, y: number, octaves: number, gain = 0.5, damp = 0.35): number {
+    const o = this.iqTmp;
+    let a = 0, b = 1, norm = 0, dx = 0, dy = 0, px = x, py = y;
+    for (let k = 0; k < octaves; k++) {
+      this.n2d(px + k * 19.1, py - k * 7.3, o);
+      dx += o[1] * damp;
+      dy += o[2] * damp;
+      a += (b * o[0]) / (1 + dx * dx + dy * dy);
+      norm += b;
+      b *= gain;
+      // p = m·p with m = [[1.6, -1.2], [1.2, 1.6]] (×2 and a ~37° rotation).
+      const nx = 1.6 * px - 1.2 * py, ny = 1.2 * px + 1.6 * py;
+      px = nx;
+      py = ny;
+    }
+    return a / norm;
+  }
+  private iqTmp = new Float64Array(3);
+
   /** Simplex noise 3D, output roughly in [-1, 1]. */
   n3(xin: number, yin: number, zin: number): number {
     const perm = this.perm;
@@ -168,6 +229,29 @@ export class Noise {
     for (let o = 0; o < octaves; o++) {
       let n = 1 - Math.abs(this.n2(x * f + o * 31.7, y * f + o * 11.3));
       n = Math.pow(n, sharpness);
+      n *= weight;
+      weight = Math.min(1, Math.max(0, n * 1.6));
+      sum += n * amp;
+      norm += amp;
+      amp *= gain;
+      f *= lacunarity;
+    }
+    return sum / norm;
+  }
+
+  /**
+   * Ridged multifractal for terrain, in [0,1]. Unlike ridged2, crests are rounded
+   * (1 − |n| has a V-shaped crease; here |n| is softened by `round`) and finer octaves
+   * add less steepness (amplitude × frequency shrinks per octave), so mountain ranges
+   * get sharp silhouettes without rows of near-vertical creases.
+   */
+  ridgedTerrain2(x: number, y: number, octaves: number, sharpness = 1.6, round = 0.14, lacunarity = 2.05, gain = 0.42): number {
+    let sum = 0, amp = 1, norm = 0, f = 1, weight = 1;
+    const r2 = round * round;
+    for (let o = 0; o < octaves; o++) {
+      const v = this.n2(x * f + o * 31.7, y * f + o * 11.3);
+      let n = 1 + round - Math.sqrt(v * v + r2);
+      n = Math.pow(Math.max(0, n / (1 + round - round)), sharpness);
       n *= weight;
       weight = Math.min(1, Math.max(0, n * 1.6));
       sum += n * amp;
