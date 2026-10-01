@@ -1,0 +1,26 @@
+[project]
+name = "norgo-music"
+version = "0.1.0"
+description = "Builds Norgo's adaptive-score stems with Stable Audio 3 (offline tool, not shipped)"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "numpy<2.3",
+    "soundfile>=0.13.1",
+    "librosa>=0.10.2",
+    "stable-audio-3",
+    "torch==2.7.1",
+    "torchaudio==2.7.1",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+stable-audio-3 = { git = "https://github.com/Stability-AI/stable-audio-3.git" }
+torch = { index = "pytorch-cu128", marker = "sys_platform == 'win32'" }
+torchaudio = { index = "pytorch-cu128", marker = "sys_platform == 'win32'" }
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

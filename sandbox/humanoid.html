@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Norgo — Humanoid Sandbox</title>
+    <style>
+      :root { color-scheme: dark; }
+      html, body { margin: 0; height: 100%; overflow: hidden; font: 12px/1.35 system-ui, sans-serif; background: #101217; color: #d8dce6; }
+      #app { position: absolute; inset: 0 330px 0 0; }
+      #panel { position: absolute; top: 0; right: 0; bottom: 0; width: 330px; overflow-y: auto; background: #171a22; border-left: 1px solid #2a2f3c; padding: 8px 10px; box-sizing: border-box; }
+      h1 { font-size: 15px; margin: 2px 0 8px; }
+      h2 { font-size: 11px; margin: 12px 0 4px; color: #9fb4ff; text-transform: uppercase; letter-spacing: 0.06em; }
+      button { background: #2a3142; color: #e4e8f2; border: 1px solid #3a4359; border-radius: 4px; padding: 3px 7px; margin: 2px 2px 2px 0; cursor: pointer; font-size: 11px; }
+      button:hover { background: #36405a; }
+      button.on { background: #4a5e9a; }
+      .row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
+      .row label { width: 92px; color: #aab2c6; flex: none; }
+      .row input[type=range] { flex: 1; }
+      .row .v { width: 34px; text-align: right; color: #8a93a8; font-variant-numeric: tabular-nums; }
+      select, input[type=text], input[type=number] { background: #232837; color: #e4e8f2; border: 1px solid #3a4359; border-radius: 4px; padding: 2px 4px; font-size: 11px; }
+      #stats { position: absolute; left: 8px; bottom: 8px; font: 11px monospace; color: #9aa3b6; background: #0008; padding: 4px 6px; border-radius: 4px; pointer-events: none; white-space: pre; }
+      .tags { display: flex; flex-wrap: wrap; }
+      #labels { position: absolute; inset: 0 330px 0 0; pointer-events: none; }
+      #labels div { position: absolute; transform: translate(-50%, -100%); font-size: 11px; color: #e8ecf5; text-shadow: 0 1px 2px #000; white-space: nowrap; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="labels"></div>
+    <div id="panel"></div>
+    <div id="stats"></div>
+    <script type="module" src="/src/sandbox/humanoid.ts"></script>
+  </body>
+</html>

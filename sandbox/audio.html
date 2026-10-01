@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Norgo — Audio Sandbox</title>
+    <style>
+      :root { color-scheme: dark; }
+      body { margin: 0; font: 13px/1.4 system-ui, sans-serif; background: #12141a; color: #d8dce6; }
+      header { padding: 10px 16px; background: #1b1e27; border-bottom: 1px solid #2a2f3c; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+      h1 { font-size: 16px; margin: 0 12px 0 0; }
+      main { display: grid; grid-template-columns: repeat(auto-fill, minmax(420px, 1fr)); gap: 12px; padding: 12px; }
+      section { background: #1a1d25; border: 1px solid #2a2f3c; border-radius: 8px; padding: 10px 12px; }
+      section h2 { font-size: 13px; margin: 0 0 8px; color: #9fb4ff; text-transform: uppercase; letter-spacing: 0.06em; }
+      button { background: #2a3142; color: #e4e8f2; border: 1px solid #3a4359; border-radius: 4px; padding: 3px 7px; margin: 2px; cursor: pointer; font-size: 12px; }
+      button:hover { background: #36405a; }
+      button.on { background: #4a5e9a; }
+      label { display: inline-flex; align-items: center; gap: 4px; margin: 2px 8px 2px 0; }
+      input[type=range] { width: 110px; }
+      select, input[type=text], input[type=number] { background: #232837; color: #e4e8f2; border: 1px solid #3a4359; border-radius: 4px; padding: 2px 4px; }
+      .grid { display: flex; flex-wrap: wrap; }
+      pre { white-space: pre-wrap; font-size: 11px; color: #a8b0c4; margin: 6px 0 0; max-height: 160px; overflow: auto; }
+      .wide { grid-column: 1 / -1; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Norgo · Procedural Audio</h1>
+      <button id="start">▶ Start audio</button>
+      <label>Seed <input id="seed" type="text" value="1337" size="10" /></label>
+      <button id="reseed">New world</button>
+      <span id="worldinfo"></span>
+      <span id="stats"></span>
+    </header>
+    <main id="main"></main>
+    <script type="module" src="/src/sandbox/audio.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Norgo — Bestiary Sandbox</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #14161a; color: #ddd; font: 13px/1.4 Inter, system-ui, sans-serif; overflow: hidden; }
+      #bar { position: absolute; top: 0; left: 0; right: 0; height: 40px; display: flex; gap: 8px; align-items: center; padding: 0 10px; background: #1d2026; border-bottom: 1px solid #333; z-index: 5; }
+      #bar input, #bar select, #bar button { background: #2a2e36; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font: inherit; }
+      #view { position: absolute; top: 40px; left: 0; right: 360px; bottom: 0; }
+      #side { position: absolute; top: 40px; right: 0; width: 360px; bottom: 0; overflow-y: auto; background: #181a1f; border-left: 1px solid #333; }
+      .card { padding: 5px 8px; border-bottom: 1px solid #262930; cursor: pointer; }
+      .card:hover, .card.sel { background: #232731; }
+      .nm { font-weight: 600; }
+      .sub { color: #999; font-size: 11px; }
+      .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 2px; vertical-align: middle; }
+      #info { position: absolute; left: 10px; bottom: 10px; max-width: 520px; background: rgba(16,17,21,.88); border: 1px solid #444; border-radius: 6px; padding: 8px 10px; white-space: pre-wrap; font-size: 12px; display: none; }
+      #acts button { margin: 2px; }
+      .label { position: absolute; transform: translate(-50%, -100%); font-size: 10px; color: #ddd; pointer-events: none; white-space: nowrap; text-shadow: 0 1px 2px #000; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <b>Bestiary</b>
+      <label>Seed <input id="seed" value="1" size="8" /></label>
+      <button id="go">Generate</button>
+      <button id="rand">Random seed</button>
+      <label>Time <input id="tod" type="range" min="0" max="1" step="0.01" value="0.4" /></label>
+      <label>Cave <input id="cave" type="checkbox" /></label>
+      <label>Speed <select id="spd"><option value="auto">auto</option><option value="idle">idle</option><option value="walk">walk</option><option value="run">run</option></select></label>
+      <label>Labels <input id="labels" type="checkbox" checked /></label>
+      <span id="stats" class="sub"></span>
+    </div>
+    <div id="view"></div>
+    <div id="side"></div>
+    <div id="info"></div>
+    <script type="module" src="/src/sandbox/creatures.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,9 @@
+node_modules
+dist
+.cache
+*.log
+.claude/
+# Python tooling (tools/music)
+tools/music/.venv/
+__pycache__/
+*.pyc

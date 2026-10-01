@@ -1,0 +1,66 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #07080b;
+  color: #e8e2d4;
+  font-family: Inter, system-ui, sans-serif;
+}
+#app {
+  position: fixed;
+  inset: 0;
+}
+#app canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+.norgo-loading {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: radial-gradient(ellipse at 50% 40%, #1b1a22 0%, #07080b 70%);
+  transition: opacity 0.9s ease;
+}
+.norgo-loading.done {
+  opacity: 0;
+  pointer-events: none;
+}
+.norgo-loading-inner {
+  width: min(420px, 80vw);
+  text-align: center;
+}
+.norgo-loading-title {
+  font-family: Cinzel, serif;
+  font-size: 54px;
+  letter-spacing: 0.3em;
+  color: #d9b56a;
+  text-shadow: 0 0 24px rgba(217, 181, 106, 0.35);
+}
+.norgo-loading-stage {
+  margin: 18px 0 10px;
+  font-size: 13px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #a79f8c;
+}
+.norgo-loading-bar {
+  height: 3px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.norgo-loading-bar > div {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #8a6a2c, #e8c77a);
+  transition: width 0.3s ease;
+}

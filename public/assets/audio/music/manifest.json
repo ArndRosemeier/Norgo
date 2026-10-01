@@ -1,0 +1,815 @@
+{
+ "version": 1,
+ "sampleRate": 48000,
+ "sets": {
+  "meadow": {
+   "tonic": "D",
+   "mode": "dorian",
+   "tonicHz": 146.83,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    900,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    1000
+   ],
+   "bpm": 76,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 37.894737,
+   "layers": {
+    "drone": [
+     "meadow/drone_0.ogg",
+     "meadow/drone_1.ogg"
+    ],
+    "texture": [
+     "meadow/texture_0.ogg",
+     "meadow/texture_1.ogg"
+    ],
+    "melody": [
+     "meadow/melody_0.ogg",
+     "meadow/melody_1.ogg",
+     "meadow/melody_2.ogg"
+    ],
+    "perc": [
+     "meadow/perc_0.ogg",
+     "meadow/perc_1.ogg"
+    ]
+   }
+  },
+  "woodland": {
+   "tonic": "G",
+   "mode": "aeolian",
+   "tonicHz": 196.0,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 70,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 41.142857,
+   "layers": {
+    "drone": [
+     "woodland/drone_0.ogg",
+     "woodland/drone_1.ogg"
+    ],
+    "texture": [
+     "woodland/texture_0.ogg",
+     "woodland/texture_1.ogg"
+    ],
+    "melody": [
+     "woodland/melody_0.ogg",
+     "woodland/melody_1.ogg",
+     "woodland/melody_2.ogg"
+    ],
+    "perc": [
+     "woodland/perc_0.ogg",
+     "woodland/perc_1.ogg"
+    ]
+   }
+  },
+  "jungle": {
+   "tonic": "E",
+   "mode": "phrygian",
+   "tonicHz": 164.81,
+   "scaleCents": [
+    0,
+    100,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 88,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 32.727273,
+   "layers": {
+    "drone": [
+     "jungle/drone_0.ogg",
+     "jungle/drone_1.ogg"
+    ],
+    "texture": [
+     "jungle/texture_0.ogg",
+     "jungle/texture_1.ogg"
+    ],
+    "melody": [
+     "jungle/melody_0.ogg",
+     "jungle/melody_1.ogg",
+     "jungle/melody_2.ogg"
+    ],
+    "perc": [
+     "jungle/perc_0.ogg",
+     "jungle/perc_1.ogg"
+    ]
+   }
+  },
+  "highland": {
+   "tonic": "A",
+   "mode": "aeolian",
+   "tonicHz": 220.0,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 66,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 29.090909,
+   "layers": {
+    "drone": [
+     "highland/drone_0.ogg",
+     "highland/drone_1.ogg"
+    ],
+    "texture": [
+     "highland/texture_0.ogg",
+     "highland/texture_1.ogg"
+    ],
+    "melody": [
+     "highland/melody_0.ogg",
+     "highland/melody_1.ogg",
+     "highland/melody_2.ogg"
+    ],
+    "perc": [
+     "highland/perc_0.ogg"
+    ]
+   }
+  },
+  "desert": {
+   "tonic": "D",
+   "mode": "phrygian dominant",
+   "tonicHz": 146.83,
+   "scaleCents": [
+    0,
+    100,
+    400,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 84,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 34.285714,
+   "layers": {
+    "drone": [
+     "desert/drone_0.ogg",
+     "desert/drone_1.ogg"
+    ],
+    "texture": [
+     "desert/texture_0.ogg",
+     "desert/texture_1.ogg"
+    ],
+    "melody": [
+     "desert/melody_0.ogg",
+     "desert/melody_1.ogg",
+     "desert/melody_2.ogg"
+    ],
+    "perc": [
+     "desert/perc_0.ogg",
+     "desert/perc_1.ogg"
+    ]
+   }
+  },
+  "coast": {
+   "tonic": "F",
+   "mode": "lydian",
+   "tonicHz": 174.61,
+   "scaleCents": [
+    0,
+    200,
+    400,
+    600,
+    700,
+    900,
+    1100
+   ],
+   "safeCents": [
+    0,
+    200,
+    400,
+    700,
+    900,
+    1100
+   ],
+   "bpm": 70,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 41.142857,
+   "layers": {
+    "drone": [
+     "coast/drone_0.ogg",
+     "coast/drone_1.ogg"
+    ],
+    "texture": [
+     "coast/texture_0.ogg"
+    ],
+    "melody": [
+     "coast/melody_0.ogg",
+     "coast/melody_1.ogg",
+     "coast/melody_2.ogg"
+    ],
+    "perc": [
+     "coast/perc_0.ogg",
+     "coast/perc_1.ogg"
+    ]
+   }
+  },
+  "wonder": {
+   "tonic": "E",
+   "mode": "lydian",
+   "tonicHz": 164.81,
+   "scaleCents": [
+    0,
+    200,
+    400,
+    600,
+    700,
+    900,
+    1100
+   ],
+   "safeCents": [
+    0,
+    200,
+    400,
+    700,
+    900,
+    1100
+   ],
+   "bpm": 60,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 32.0,
+   "layers": {
+    "drone": [
+     "wonder/drone_0.ogg",
+     "wonder/drone_1.ogg"
+    ],
+    "texture": [
+     "wonder/texture_0.ogg",
+     "wonder/texture_1.ogg"
+    ],
+    "melody": [
+     "wonder/melody_0.ogg",
+     "wonder/melody_1.ogg",
+     "wonder/melody_2.ogg"
+    ],
+    "perc": [
+     "wonder/perc_0.ogg",
+     "wonder/perc_1.ogg"
+    ]
+   }
+  },
+  "ember": {
+   "tonic": "C",
+   "mode": "phrygian",
+   "tonicHz": 130.81,
+   "scaleCents": [
+    0,
+    100,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 72,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 40.0,
+   "layers": {
+    "drone": [
+     "ember/drone_0.ogg",
+     "ember/drone_1.ogg"
+    ],
+    "texture": [
+     "ember/texture_0.ogg",
+     "ember/texture_1.ogg"
+    ],
+    "melody": [
+     "ember/melody_0.ogg",
+     "ember/melody_1.ogg",
+     "ember/melody_2.ogg"
+    ],
+    "perc": [
+     "ember/perc_0.ogg",
+     "ember/perc_1.ogg"
+    ]
+   }
+  },
+  "night": {
+   "tonic": "C#",
+   "mode": "aeolian",
+   "tonicHz": 138.59,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 60,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 32.0,
+   "layers": {
+    "drone": [
+     "night/drone_0.ogg",
+     "night/drone_1.ogg"
+    ],
+    "texture": [
+     "night/texture_0.ogg",
+     "night/texture_1.ogg"
+    ],
+    "melody": [
+     "night/melody_0.ogg",
+     "night/melody_1.ogg",
+     "night/melody_2.ogg"
+    ],
+    "perc": [
+     "night/perc_0.ogg",
+     "night/perc_1.ogg"
+    ]
+   }
+  },
+  "cave": {
+   "tonic": "G",
+   "mode": "phrygian",
+   "tonicHz": 196.0,
+   "scaleCents": [
+    0,
+    100,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 56,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 34.285714,
+   "layers": {
+    "drone": [
+     "cave/drone_0.ogg",
+     "cave/drone_1.ogg"
+    ],
+    "texture": [
+     "cave/texture_0.ogg",
+     "cave/texture_1.ogg"
+    ],
+    "melody": [
+     "cave/melody_0.ogg",
+     "cave/melody_1.ogg",
+     "cave/melody_2.ogg"
+    ],
+    "perc": [
+     "cave/perc_0.ogg",
+     "cave/perc_1.ogg"
+    ]
+   }
+  },
+  "underglow": {
+   "tonic": "D#",
+   "mode": "lydian",
+   "tonicHz": 155.56,
+   "scaleCents": [
+    0,
+    200,
+    400,
+    600,
+    700,
+    900,
+    1100
+   ],
+   "safeCents": [
+    0,
+    200,
+    400,
+    700,
+    900,
+    1100
+   ],
+   "bpm": 58,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 33.103448,
+   "layers": {
+    "drone": [
+     "underglow/drone_0.ogg"
+    ],
+    "texture": [
+     "underglow/texture_0.ogg",
+     "underglow/texture_1.ogg"
+    ],
+    "melody": [
+     "underglow/melody_1.ogg",
+     "underglow/melody_2.ogg"
+    ],
+    "perc": [
+     "underglow/perc_0.ogg",
+     "underglow/perc_1.ogg"
+    ]
+   }
+  },
+  "underdread": {
+   "tonic": "F#",
+   "mode": "phrygian",
+   "tonicHz": 185.0,
+   "scaleCents": [
+    0,
+    100,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 64,
+   "beatsPerBar": 4,
+   "bars": 8,
+   "loopSeconds": 30.0,
+   "layers": {
+    "drone": [
+     "underdread/drone_0.ogg",
+     "underdread/drone_1.ogg"
+    ],
+    "texture": [
+     "underdread/texture_0.ogg",
+     "underdread/texture_1.ogg"
+    ],
+    "melody": [
+     "underdread/melody_0.ogg",
+     "underdread/melody_1.ogg",
+     "underdread/melody_2.ogg"
+    ],
+    "perc": [
+     "underdread/perc_0.ogg",
+     "underdread/perc_1.ogg"
+    ]
+   }
+  },
+  "hearth": {
+   "tonic": "G",
+   "mode": "mixolydian",
+   "tonicHz": 196.0,
+   "scaleCents": [
+    0,
+    200,
+    400,
+    500,
+    700,
+    900,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    400,
+    500,
+    700,
+    900
+   ],
+   "bpm": 96,
+   "beatsPerBar": 4,
+   "bars": 16,
+   "loopSeconds": 40.0,
+   "layers": {
+    "drone": [
+     "hearth/drone_0.ogg",
+     "hearth/drone_1.ogg"
+    ],
+    "texture": [
+     "hearth/texture_0.ogg",
+     "hearth/texture_1.ogg"
+    ],
+    "melody": [
+     "hearth/melody_0.ogg",
+     "hearth/melody_1.ogg",
+     "hearth/melody_2.ogg"
+    ],
+    "perc": [
+     "hearth/perc_0.ogg",
+     "hearth/perc_1.ogg"
+    ]
+   }
+  },
+  "sylvan": {
+   "tonic": "E",
+   "mode": "dorian",
+   "tonicHz": 164.81,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    900,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    1000
+   ],
+   "bpm": 72,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 40.0,
+   "layers": {
+    "drone": [
+     "sylvan/drone_0.ogg",
+     "sylvan/drone_1.ogg"
+    ],
+    "texture": [
+     "sylvan/texture_0.ogg",
+     "sylvan/texture_1.ogg"
+    ],
+    "melody": [
+     "sylvan/melody_0.ogg",
+     "sylvan/melody_1.ogg",
+     "sylvan/melody_2.ogg"
+    ],
+    "perc": [
+     "sylvan/perc_0.ogg",
+     "sylvan/perc_1.ogg"
+    ]
+   }
+  },
+  "forge": {
+   "tonic": "C",
+   "mode": "aeolian",
+   "tonicHz": 130.81,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 84,
+   "beatsPerBar": 4,
+   "bars": 12,
+   "loopSeconds": 34.285714,
+   "layers": {
+    "drone": [
+     "forge/drone_0.ogg",
+     "forge/drone_1.ogg"
+    ],
+    "texture": [
+     "forge/texture_0.ogg",
+     "forge/texture_1.ogg"
+    ],
+    "melody": [
+     "forge/melody_0.ogg",
+     "forge/melody_1.ogg",
+     "forge/melody_2.ogg"
+    ],
+    "perc": [
+     "forge/perc_0.ogg",
+     "forge/perc_1.ogg"
+    ]
+   }
+  },
+  "wild": {
+   "tonic": "A",
+   "mode": "phrygian",
+   "tonicHz": 220.0,
+   "scaleCents": [
+    0,
+    100,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "safeCents": [
+    0,
+    300,
+    500,
+    700,
+    800,
+    1000
+   ],
+   "bpm": 100,
+   "beatsPerBar": 4,
+   "bars": 16,
+   "loopSeconds": 38.4,
+   "layers": {
+    "drone": [
+     "wild/drone_0.ogg",
+     "wild/drone_1.ogg"
+    ],
+    "texture": [
+     "wild/texture_0.ogg",
+     "wild/texture_1.ogg"
+    ],
+    "melody": [
+     "wild/melody_0.ogg",
+     "wild/melody_1.ogg",
+     "wild/melody_2.ogg"
+    ],
+    "perc": [
+     "wild/perc_0.ogg",
+     "wild/perc_1.ogg"
+    ]
+   }
+  },
+  "combat": {
+   "tonic": "D",
+   "mode": "harmonic minor",
+   "tonicHz": 146.83,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1100
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800
+   ],
+   "bpm": 132,
+   "beatsPerBar": 4,
+   "bars": 20,
+   "loopSeconds": 36.363636,
+   "layers": {
+    "drone": [
+     "combat/drone_0.ogg",
+     "combat/drone_1.ogg"
+    ],
+    "texture": [
+     "combat/texture_0.ogg",
+     "combat/texture_1.ogg"
+    ],
+    "melody": [
+     "combat/melody_0.ogg",
+     "combat/melody_1.ogg",
+     "combat/melody_2.ogg"
+    ],
+    "perc": [
+     "combat/perc_0.ogg",
+     "combat/perc_1.ogg"
+    ]
+   }
+  },
+  "boss": {
+   "tonic": "C",
+   "mode": "harmonic minor",
+   "tonicHz": 130.81,
+   "scaleCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800,
+    1100
+   ],
+   "safeCents": [
+    0,
+    200,
+    300,
+    500,
+    700,
+    800
+   ],
+   "bpm": 140,
+   "beatsPerBar": 4,
+   "bars": 20,
+   "loopSeconds": 34.285714,
+   "layers": {
+    "drone": [
+     "boss/drone_0.ogg",
+     "boss/drone_1.ogg"
+    ],
+    "texture": [
+     "boss/texture_0.ogg",
+     "boss/texture_1.ogg"
+    ],
+    "melody": [
+     "boss/melody_0.ogg",
+     "boss/melody_1.ogg",
+     "boss/melody_2.ogg"
+    ],
+    "perc": [
+     "boss/perc_0.ogg",
+     "boss/perc_1.ogg"
+    ]
+   }
+  }
+ }
+}

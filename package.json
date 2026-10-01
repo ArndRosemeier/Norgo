@@ -1,0 +1,25 @@
+{
+  "name": "norgo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Norgo - a procedurally generated, streamed, destructible open world (TypeScript / three.js)",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "assets": "tsx tools/build-human-assets.ts",
+    "test": "tsx tools/selftest.ts"
+  },
+  "dependencies": {
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "@types/three": "^0.186.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.0",
+    "vite": "^8.3.1"
+  }
+}

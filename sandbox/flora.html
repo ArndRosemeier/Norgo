@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Norgo — Flora Sandbox</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #14161a; color: #ddd; font: 13px/1.4 Inter, system-ui, sans-serif; overflow: hidden; }
+      #bar { position: absolute; top: 0; left: 0; right: 0; min-height: 40px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 4px 10px; background: #1d2026; border-bottom: 1px solid #333; z-index: 5; box-sizing: border-box; }
+      #bar input, #bar select, #bar button { background: #2a2e36; color: #ddd; border: 1px solid #444; border-radius: 4px; padding: 4px 6px; font: inherit; }
+      #view { position: absolute; top: 76px; left: 0; right: 340px; bottom: 0; }
+      #side { position: absolute; top: 76px; right: 0; width: 340px; bottom: 0; overflow-y: auto; background: #181a1f; border-left: 1px solid #333; }
+      .card { padding: 4px 8px; border-bottom: 1px solid #262930; cursor: pointer; }
+      .card:hover { background: #232731; }
+      .nm { font-weight: 600; }
+      .sub { color: #999; font-size: 11px; }
+      .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 2px; vertical-align: middle; border: 1px solid #0006; }
+      .label { position: absolute; transform: translate(-50%, -100%); font-size: 10px; color: #eee; pointer-events: none; white-space: nowrap; text-shadow: 0 1px 2px #000, 0 0 3px #000; }
+      h4 { margin: 8px 8px 2px; color: #bbb; }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <b>Flora</b>
+      <label>Seed <input id="seed" value="1234" size="9" /></label>
+      <button id="rand">Random</button>
+      <label>Mode <select id="mode"><option value="gallery">Species gallery</option><option value="patch">Biome patch (real scatter)</option></select></label>
+      <label>Tier <select id="tier"><option value="0">0 near</option><option value="1">1</option><option value="2">2</option><option value="3">3 impostor</option></select></label>
+      <label>Biome <select id="biome"></select></label>
+      <label>Patch LOD <select id="plod"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+      <button id="go">Generate</button>
+      <label>Wind <input id="wind" type="range" min="0" max="1.5" step="0.01" value="0.4" /></label>
+      <label>Sun <input id="tod" type="range" min="0" max="1" step="0.01" value="0.35" /></label>
+      <label>Labels <input id="labels" type="checkbox" checked /></label>
+      <button id="fell">Fell trees</button>
+      <button id="smash">Smash rocks</button>
+      <button id="pick">Harvest plants</button>
+      <button id="hit">Damage</button>
+      <span id="stats" class="sub"></span>
+    </div>
+    <div id="view"></div>
+    <div id="side"></div>
+    <script type="module" src="/src/sandbox/flora.ts"></script>
+  </body>
+</html>
