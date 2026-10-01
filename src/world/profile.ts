@@ -231,7 +231,7 @@ export function createProfile(seed: number): WorldProfile {
     pillarMul: rng.range(0.5, 1.5),
     canyonMul: rng.range(0.4, 1.6),
     caveDensity: rng.range(0.6, 1.4),
-    caveWidth: rng.range(0.8, 1.5),
+    caveWidth: rng.range(1.15, 1.7),
     cavernFrequency: rng.range(0.5, 1.5),
     underworldOpenness: rng.range(0.55, 1),
     shaftFrequency: rng.range(0.5, 1.5),

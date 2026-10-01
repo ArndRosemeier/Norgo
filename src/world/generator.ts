@@ -622,11 +622,13 @@ export class WorldGenerator {
     const p = this.profile;
     if (caves) {
       const s = 1 / (62 * p.caveWidth);
-      out[o] = this.nCave.n3(x * s, y * s * 1.7, z * s);
-      out[o + 1] = this.nCave.n3(x * s + 31.4, y * s * 1.7 - 17.7, z * s + 9.1);
+      // Mild vertical compression keeps tunnels mostly walkable (not shafts) without
+      // squashing them into crawl spaces.
+      out[o] = this.nCave.n3(x * s, y * s * 1.25, z * s);
+      out[o + 1] = this.nCave.n3(x * s + 31.4, y * s * 1.25 - 17.7, z * s + 9.1);
       const s2 = 1 / 150;
-      out[o + 2] = this.nCave2.n3(x * s2, y * s2 * 1.4, z * s2);
-      out[o + 3] = this.nCave2.n3(x * s2 - 51.2, y * s2 * 1.4 + 3.3, z * s2 + 22.8);
+      out[o + 2] = this.nCave2.n3(x * s2, y * s2 * 1.2, z * s2);
+      out[o + 3] = this.nCave2.n3(x * s2 - 51.2, y * s2 * 1.2 + 3.3, z * s2 + 22.8);
       out[o + 4] = this.nCavern.fbm3(x / 130, y / 75, z / 130, 2);
     } else {
       out[o] = out[o + 1] = out[o + 2] = out[o + 3] = 1;
@@ -683,23 +685,24 @@ export class WorldGenerator {
 
     if (caves && y < h + 3) {
       const depth = h - y;
-      // Caves only reach the surface where entrances are allowed. Near the surface tunnels
-      // are closed by an offset (not scaled), so they end in rock instead of thin slits.
-      const open = Math.max(smoothstep(5, 12, depth), smoothstep(0.35, 0.75, col.caveEntrance));
-      const closeBy = (1 - open) * 40;
-      if (open > 0) {
-        const a = ch[o], b = ch[o + 1];
-        const r1 = 0.085 * p.caveDensity;
-        let cave = (r1 - Math.sqrt(a * a + b * b)) * 85;
-        const a2 = ch[o + 2], b2 = ch[o + 3];
-        const deep = smoothstep(-20, -90, y);
-        if (deep > 0) cave = Math.max(cave, (0.07 - Math.sqrt(a2 * a2 + b2 * b2)) * 160 - (1 - deep) * 40);
-        // Big caverns between surface and underworld.
-        const cavernMask = smoothstep(h - 30, h - 60, y) * smoothstep(UNDERWORLD_CEIL - 10, UNDERWORLD_CEIL + 30, y);
-        if (cavernMask > 0) cave = Math.max(cave, (ch[o + 4] - (0.58 - 0.1 * p.cavernFrequency)) * 140 - (1 - cavernMask) * 60);
-        cave -= closeBy;
-        if (cave > -6) d = Math.min(d, -cave);
-      }
+      // Caves are meant to be explored, so tunnels are never narrowed to fit: they keep their
+      // full width and are capped instead. Away from entrances a tunnel ends under a flat rock
+      // ceiling `cover` metres below the surface; at entrances the cover is zero and the
+      // tunnel opens to the sky at full width. (Offsetting the field instead pinched tunnels
+      // into crawl spaces and slits near the surface.)
+      const entrance = smoothstep(0.35, 0.55, col.caveEntrance);
+      const cover = (1 - entrance) * 7;
+      const a = ch[o], b = ch[o + 1];
+      // Width has a solid floor; the world's cave density mostly shapes how often caves open up.
+      const r1 = 0.13 * (0.85 + 0.15 * p.caveDensity);
+      let cave = Math.min((r1 - Math.sqrt(a * a + b * b)) * 85, (depth - cover) * 3);
+      // Deep tunnel network, below 20 m under sea level (capped the same way, never tapered).
+      const a2 = ch[o + 2], b2 = ch[o + 3];
+      if (y < -20) cave = Math.max(cave, Math.min((0.1 - Math.sqrt(a2 * a2 + b2 * b2)) * 160, (-20 - y) * 3, (depth - cover) * 3));
+      // Big caverns between surface and underworld.
+      const cavernMask = smoothstep(h - 30, h - 60, y) * smoothstep(UNDERWORLD_CEIL - 10, UNDERWORLD_CEIL + 30, y);
+      if (cavernMask > 0) cave = Math.max(cave, (ch[o + 4] - (0.58 - 0.1 * p.cavernFrequency)) * 140 - (1 - cavernMask) * 60);
+      if (cave > -6) d = Math.min(d, -cave);
     }
 
     // Underworld cavern layer.
@@ -1134,6 +1137,27 @@ export class WorldGenerator {
   }
 
   /** Find a pleasant spawn position near the origin: on land, near a settlement if possible. */
+  /**
+   * Ground height at (x, z) if it is a safe place to put a player down, else NaN:
+   * dry, flat around (no slope or ledge to slide off), open sky above (no overhang
+   * or cave ceiling) and solid underneath (not a thin crust over a cave).
+   */
+  safeGround(x: number, z: number, from: number): number {
+    const y = this.findGround(x, from, z, 400);
+    if (Number.isNaN(y) || y < SEA_LEVEL + 1.5) return NaN;
+    for (const [r, tol] of [[2.5, 0.6], [6, 1.8]] as const) {
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const gy = this.findGround(x + Math.cos(a) * r, y + 12, z + Math.sin(a) * r, 30);
+        if (Number.isNaN(gy) || Math.abs(gy - y) > tol || gy < SEA_LEVEL + 0.5) return NaN;
+      }
+    }
+    for (const dy of [0.6, 1.4, 2.4, 4]) if (this.density(x, y + dy, z) > 0) return NaN;
+    for (const dy of [1, 2.5]) if (this.density(x, y - dy, z) <= 0) return NaN;
+    return y;
+  }
+
+  /** New-game spawn: a safe, flat spot just outside a settlement near the origin. */
   findSpawn(): [number, number, number] {
     for (let r = 0; r < 40; r++) {
       const ang = r * 2.4;
@@ -1141,16 +1165,22 @@ export class WorldGenerator {
       const x = Math.cos(ang) * dist, z = Math.sin(ang) * dist;
       const sites = this.sites.sitesNear(x, z, 1500);
       for (const s of sites) {
-        const sx = s.x + s.radius * 1.3, sz = s.z;
-        const y = this.findGround(sx, s.plateau + 80, sz, 300);
-        if (!Number.isNaN(y) && y > 1) return [sx, y + 0.05, sz];
+        // Ring just outside the town, starting at the old fixed spot (+x), 16 directions.
+        for (const k of [1.3, 1.5, 1.7, 1.15]) {
+          for (let j = 0; j < 16; j++) {
+            const a = (j % 2 ? 1 : -1) * Math.ceil(j / 2) * (Math.PI / 8);
+            const sx = s.x + Math.cos(a) * s.radius * k, sz = s.z + Math.sin(a) * s.radius * k;
+            const y = this.safeGround(sx, sz, s.plateau + 80);
+            if (!Number.isNaN(y)) return [sx, y + 0.05, sz];
+          }
+        }
       }
     }
-    for (let r = 0; r < 200; r++) {
+    for (let r = 0; r < 400; r++) {
       const x = r * 97.3, z = r * -41.1;
       const c = this.column(x, z);
       if (c.land > 0.9 && c.height > 3) {
-        const y = this.findGround(x, c.height + 60, z, 200);
+        const y = this.safeGround(x, z, c.height + 60);
         if (!Number.isNaN(y)) return [x, y + 0.05, z];
       }
     }
