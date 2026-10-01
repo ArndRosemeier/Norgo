@@ -6,6 +6,23 @@
  *
  * Inspect from the console: `norgo.prof.report()`.
  */
+/** One main-thread freeze, with the browser's attribution (long-animation-frame API). */
+export interface HitchEntry {
+  /** Seconds since the session (game) started; negative = during loading. */
+  t: number;
+  ms: number;
+  /** Time the main thread was blocked beyond 50 ms per task. */
+  block: number;
+  /** Heaviest scripts in that frame: duration, invoker, function@file:char. */
+  scripts: string[];
+  /** Style/layout forced by scripts (ms). */
+  layout: number;
+  /** Game frame breakdown of the slowest recent frame (if the freeze was inside a frame). */
+  frame?: string;
+}
+
+const JOURNAL_KEY = 'norgo.hitches';
+
 export class FrameProfiler {
   private cur = new Map<string, number>();
   private t0 = 0;
@@ -31,7 +48,69 @@ export class FrameProfiler {
   private lastBegin = 0;
   readonly gaps: { t: number; ms: number }[] = [];
 
+  /**
+   * Persistent hitch journal: every main-thread freeze ≥ 120 ms with script attribution,
+   * kept across reloads in localStorage (`norgo.prof.hitches()`), so a bad start can be
+   * diagnosed after the fact.
+   */
+  readonly journal: { session: string; startedAt: string; entries: HitchEntry[] } = { session: '', startedAt: '', entries: [] };
+  private sessionT0 = performance.now();
+  private saveTimer = 0;
+
+  /** Start a new journal session (called when a game starts). */
+  startSession(name: string) {
+    this.journal.session = name;
+    this.journal.startedAt = new Date().toISOString();
+    this.journal.entries.length = 0;
+    this.sessionT0 = performance.now();
+    this.persist();
+  }
+
+  /** The journal of the current (or last) session, also readable after a reload. */
+  hitches(): { session: string; startedAt: string; entries: HitchEntry[] } {
+    if (this.journal.entries.length || this.journal.session) return this.journal;
+    try {
+      return JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? 'null') ?? this.journal;
+    } catch {
+      return this.journal;
+    }
+  }
+
+  private persist() {
+    if (this.saveTimer) return;
+    this.saveTimer = window.setTimeout(() => {
+      this.saveTimer = 0;
+      try {
+        localStorage.setItem(JOURNAL_KEY, JSON.stringify(this.journal));
+      } catch {
+        /* storage unavailable */
+      }
+    }, 1500);
+  }
+
   constructor() {
+    try {
+      const po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries() as (PerformanceEntry & { blockingDuration?: number; scripts?: { duration: number; invoker?: string; sourceFunctionName?: string; sourceURL?: string; sourceCharPosition?: number; forcedStyleAndLayoutDuration?: number }[] })[]) {
+          if (e.duration < 120) continue;
+          const scripts = (e.scripts ?? []).slice().sort((a, b) => b.duration - a.duration);
+          const last = this.slow[this.slow.length - 1];
+          this.journal.entries.push({
+            t: +((e.startTime - this.sessionT0) / 1000).toFixed(2),
+            ms: Math.round(e.duration),
+            block: Math.round(e.blockingDuration ?? 0),
+            scripts: scripts.slice(0, 4).map((x) => `${Math.round(x.duration)}ms ${x.invoker ?? ''} ${x.sourceFunctionName || '?'}@${(x.sourceURL ?? '').split('/').pop()?.split('?')[0]}:${x.sourceCharPosition ?? -1}`),
+            layout: Math.round(scripts.reduce((a, x) => a + (x.forcedStyleAndLayoutDuration ?? 0), 0)),
+            frame: last && Math.abs(last.t * 1000 - (e.startTime + e.duration)) < 400 ? last.parts.map(([k, v]) => k + ':' + v).join(' ') : undefined,
+          });
+          if (this.journal.entries.length > 120) this.journal.entries.shift();
+          this.persist();
+        }
+      });
+      po.observe({ type: 'long-animation-frame', buffered: true });
+    } catch {
+      /* long-animation-frame unsupported */
+    }
     try {
       const po = new PerformanceObserver((list) => {
         for (const e of list.getEntries()) {

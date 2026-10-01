@@ -321,8 +321,7 @@ export class WorldGenerator {
       const amp = Math.min(t.hillAmp, t.hillScale * HILL_MAX_RATIO);
       return amp > 0.01 ? this.nHill.iqFbm2(wx / t.hillScale, wz / t.hillScale, 4) * 2 * amp : 0;
     };
-    const hillsA = hillsOf(ta);
-    const hills = out.blend > 0.001 ? lerp(hillsA, hillsOf(tb), out.blend) : hillsA;
+    const hills = out.blend < 0.02 ? hillsOf(ta) : out.blend > 0.98 ? hillsOf(tb) : lerp(hillsOf(ta), hillsOf(tb), out.blend);
     h += hills * (0.3 + 0.7 * land);
 
     // Dunes: asymmetric ridges with a dominant wind direction.
@@ -377,7 +376,10 @@ export class WorldGenerator {
     const rsig = rf(wx, wz, x, z);
     const rv = Math.abs(rsig);
     out.river = 0;
-    if (land > 0 && h > -2 && rv < 0.25) {
+    // Only columns a river can reach: the bank cap binds within (h / 0.58 + width) metres,
+    // and the field changes by at most ~0.004 per metre.
+    const reach = (Math.max(0, h + 2.6) / 0.58 + 5 + 5 * p.riverDensity) * 0.004;
+    if (land > 0 && h > -2 && rv < Math.min(0.25, reach)) {
       const e = 2;
       const gx = (rf(wx + e, wz, x + e, z) - rsig) / e, gz = (rf(wx, wz + e, x, z + e) - rsig) / e;
       const dist = rv / Math.max(1e-6, Math.hypot(gx, gz));

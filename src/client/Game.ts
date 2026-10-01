@@ -144,6 +144,7 @@ export class Game implements ClientContext {
   // ---------------------------------------------------------------- boot
 
   async start(onProgress: (stage: string, frac: number) => void) {
+    this.prof.startSession(`${this.seed >>> 0}`);
     (window as unknown as { norgoBoot: Game }).norgoBoot = this;
     onProgress('Weaving the world palette', 0.05);
     const texData = await synthesizeInWorker(this.seed);
