@@ -55,7 +55,10 @@ function facade(k: Kit, c: BuildCtx, W: number, H: number, t: number, doorX: num
   wallBoxes(k, W, H, t, [{ x: doorX, w: 2 * doorR + 0.02, h: 2 * doorR + 0.02 }], Surf.Plaster, plaster);
   roundFrame(k, doorX, doorR, doorR, t, stone);
   // Stone footing & coping.
-  k.box(0, 0, t / 2 + 0.03, W + 0.1, 0.45, 0.08, Surf.Rubble, stone, { lod: 1 });
+  // (the footing stops at the round door so it doesn't form a sill to trip over)
+  const fl = -W / 2 - 0.05, fr = W / 2 + 0.05, da = doorX - doorR - 0.01, db = doorX + doorR + 0.01;
+  if (da - fl > 0.02) k.box((fl + da) / 2, 0, t / 2 + 0.03, da - fl, 0.45, 0.08, Surf.Rubble, stone, { lod: 1 });
+  if (fr - db > 0.02) k.box((db + fr) / 2, 0, t / 2 + 0.03, fr - db, 0.45, 0.08, Surf.Rubble, stone, { lod: 1 });
   k.box(0, H - 0.05, 0, W + 0.3, 0.2, t + 0.25, Surf.Rubble, stone, { lod: 1 });
   // Round windows either side of the door.
   const win = windowLook(c, { shape: 'round', w: 0.75 * c.s, sill: 0.95 * c.s, glow: 0xffc070, flowerbox: false });

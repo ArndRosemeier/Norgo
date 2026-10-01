@@ -291,9 +291,21 @@ export class PlayerController {
 
     // --- ground probe & snapping
     const prevGrounded = this.grounded;
-    const probe = this.terrain.raycast(this.pos.x, this.pos.y + r, this.pos.z, 0, -1, 0, r + (prevGrounded ? 0.45 : 0.08));
-    // Upward velocity from walking up slopes must not detach us from the ground; only a real launch does.
-    if (probe && probe.ny > 0.45 && (!this.airborneLaunch || this.vel.y <= 0.5) && !this.swimming && !this.climbing) {
+    const reach = prevGrounded ? 0.45 : 0.08;
+    const probe = this.terrain.raycast(this.pos.x, this.pos.y + r, this.pos.z, 0, -1, 0, r + reach);
+    const canLand = (!this.airborneLaunch || this.vel.y <= 0.5) && !this.swimming && !this.climbing;
+    // Building surfaces (steps, floors, porches) above the terrain are the real ground: stand and
+    // snap on them, never through them onto the terrain underneath (that bounced players on stairs).
+    const top = this.colliderGround(reach);
+    if (top !== null && canLand && (!probe || top >= probe.y - 0.02)) {
+      this.airborneLaunch = false;
+      this.grounded = true;
+      this.groundNormal.set(0, 1, 0);
+      const gap = this.pos.y - top;
+      if (gap > 0.005) this.pos.y -= Math.min(gap, 4 * h + gap * 0.5);
+      this.airTime = 0;
+    } else if (probe && probe.ny > 0.45 && canLand) {
+      // Upward velocity from walking up slopes must not detach us from the ground; only a real launch does.
       this.airborneLaunch = false;
       this.grounded = true;
       this.groundNormal.set(probe.nx, probe.ny, probe.nz);
@@ -324,6 +336,21 @@ export class PlayerController {
     else if (hs < 2.6) this.move = 'walk';
     else if (hs < 6.8) this.move = 'run';
     else this.move = 'sprint';
+  }
+
+  /**
+   * Highest walkable collider top under the capsule's footprint, from 0.3 above the feet down
+   * to `reach` below them (centre plus four rim rays, so standing on a step edge counts).
+   */
+  private colliderGround(reach: number): number | null {
+    let best: number | null = null;
+    const rr = this.radius * 0.95;
+    for (let i = 0; i < 5; i++) {
+      const ox = i === 1 ? rr : i === 2 ? -rr : 0, oz = i === 3 ? rr : i === 4 ? -rr : 0;
+      const hit = this.colliders.raycast([this.pos.x + ox, this.pos.y + 0.3, this.pos.z + oz], [0, -1, 0], 0.3 + reach, (c) => c.solid);
+      if (hit && hit.normal[1] > 0.6 && (best === null || hit.point[1] > best)) best = hit.point[1];
+    }
+    return best;
   }
 
   private groundedByCollider(): boolean {

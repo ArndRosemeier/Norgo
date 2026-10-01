@@ -31,11 +31,23 @@ export function batter(k: Kit, c: BuildCtx, out: ShellOut, h: number, depth: num
     k.use(out.walls[0][side]);
     const L = side % 2 === 0 ? c.w : c.d;
     pushFace(k, side, c.w, c.d, 0);
-    const segs: [number, number][] = side === 0 && out.door >= 0 ? [[-L / 2, c.doorX - 0.9 * c.s], [c.doorX + 0.9 * c.s, L / 2]] : [[-L / 2, L / 2]];
+    // Wall segments between this side's door openings (plus a margin for the frame).
+    const segs: [number, number][] = [];
+    let x0 = -L / 2;
+    for (const o of (out.openings ?? []).filter((o) => o.side === side).sort((a, b) => a.x - b.x)) {
+      segs.push([x0, o.x - o.w / 2 - 0.35]);
+      x0 = o.x + o.w / 2 + 0.35;
+    }
+    segs.push([x0, L / 2]);
     for (const [a, b] of segs) {
       if (b - a < 0.3) continue;
       const m = (a + b) / 2;
-      k.frustum(m, -0.3, depth / 2, b - a + (side % 2 ? 0 : depth * 2), depth, b - a, 0.06, h + 0.3, surf, col, { oz: -depth / 2 + 0.03, lod: 1 });
+      // Front/back faces flare out over the corners to meet the side faces; never into
+      // the door opening (the flare only applies at the wall's real ends).
+      const eL = side % 2 === 0 && a <= -L / 2 + 1e-6 ? depth : 0;
+      const eR = side % 2 === 0 && b >= L / 2 - 1e-6 ? depth : 0;
+      const bm = m + (eR - eL) / 2;
+      k.frustum(bm, -0.3, depth / 2, b - a + eL + eR, depth, b - a, 0.06, h + 0.3, surf, col, { ox: m - bm, oz: -depth / 2 + 0.03, lod: 1 });
       if (seam) k.box(m, h * 0.35, depth * 0.62 + 0.01, b - a - 0.2, 0.06, 0.03, Surf.Fire, seam, { emit: seam, emitI: 2.2, lod: 1, rx: -Math.atan2(depth, h) });
     }
     k.pop();

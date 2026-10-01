@@ -24,13 +24,16 @@ function lantern(k: Kit, x: number, y: number, z: number) {
 }
 
 /** Scrap patches & odd planks nailed over a wall face (wall frame: centre line, +z outward). */
-function patches(k: Kit, c: BuildCtx, L: number, H: number, t: number) {
+function patches(k: Kit, c: BuildCtx, L: number, H: number, t: number, holes: { x: number; w: number; h: number }[] = []) {
   const n = c.rng.int(1, 3);
   for (let i = 0; i < n; i++) {
     const metal = c.rng.chance(0.6);
     const pw = c.rng.range(0.5, 1.3), ph = c.rng.range(0.4, 1.1);
     const x = c.rng.range(-L / 2 + pw / 2, L / 2 - pw / 2), y = c.rng.range(0.1, Math.max(0.2, H - ph - 0.1));
-    k.boxC(x, y + ph / 2, t / 2 + 0.025, pw, ph, 0.03, metal ? Surf.Metal : Surf.Planks, jitter(c.rng.pick(metal ? SCRAP : PLANKS), c.rng, 0.12), { rz: c.rng.range(-0.15, 0.15), lod: 1 });
+    const surf = metal ? Surf.Metal : Surf.Planks, col = jitter(c.rng.pick(metal ? SCRAP : PLANKS), c.rng, 0.12), rz = c.rng.range(-0.15, 0.15);
+    // Never nail a patch over a doorway (random draws are made first to keep the build deterministic).
+    if (holes.some((o) => Math.abs(x - o.x) < (pw + o.w) / 2 + 0.05 && y < o.h)) continue;
+    k.boxC(x, y + ph / 2, t / 2 + 0.025, pw, ph, 0.03, surf, col, { rz, lod: 1 });
   }
 }
 
@@ -121,7 +124,7 @@ function shanty(k: Kit, c: BuildCtx): Blueprint['interior'] {
         if (holes.some((o) => Math.abs(o.x - x) < o.w / 2 + 0.6)) continue;
         windowAt(k, x, t, { ...win, lit: rng.chance(0.75) ? 2.4 : 0 });
       }
-      patches(k, c, L, storey, t);
+      patches(k, c, L, storey, t, holes);
       // Corner posts, slightly crooked.
       k.box(-L / 2 + 0.06, 0, t / 2 + 0.02, 0.12, storey, 0.06, Surf.Timber, 0x3e3428, { lod: 1, rz: rng.range(-0.03, 0.03) });
       if (holes.length) {

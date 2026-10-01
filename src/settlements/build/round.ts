@@ -92,7 +92,15 @@ export function buildRound(k: Kit, s: RoundSpec): ShellOut {
         k.box(0, o.h, t / 2 + 0.01, o.w + 0.4, 0.18, 0.12, s.door.frameSurf, s.door.frameCol, { lod: 1 });
       }
       if (look.frame && f > 0) k.box(0, 0, t / 2 + 0.015, L, look.frame.w, 0.06, look.frame.surf, look.frame.col, { lod: 1 });
-      if (f === 0 && s.plinth > 0.05) k.box(0, 0, t / 2 + 0.02, L, Math.min(0.5, s.plinth + 0.2), 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+      if (f === 0 && s.plinth > 0.05) {
+        // Base course; on the door segment it stops at the opening.
+        const bh = Math.min(0.5, s.plinth + 0.2);
+        if (!holes.length) k.box(0, 0, t / 2 + 0.02, L, bh, 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+        else {
+          const side = (L - holes[0].w) / 2;
+          if (side > 0.02) for (const sx of [-1, 1]) k.box(sx * (holes[0].w / 2 + side / 2), 0, t / 2 + 0.02, side, bh, 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+        }
+      }
       k.pop();
     }
     walls.push(row);

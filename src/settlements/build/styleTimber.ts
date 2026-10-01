@@ -101,7 +101,11 @@ function hoist(k: Kit, c: BuildCtx, out: ShellOut) {
   k.box(0, y, c.d / 2 + 0.2, 0.2, 0.2, 1.6, Surf.Timber, c.trim.col, { lod: 1 });
   k.cyl(0, y - 0.25, c.d / 2 + 0.85, 0.12, 0.12, 0.08, Surf.Metal, 0x4a4440, { rz: Math.PI / 2, seg: 8, lod: 1 });
   k.box(0, y - 2.6, c.d / 2 + 0.85, 0.03, 2.4, 0.03, Surf.Rope, 0x8a6a3a, { lod: 1 });
-  k.box(0, out.wallTop - 1.6, c.d / 2 - c.t / 2, 1.4, 1.5, c.t + 0.06, Surf.Planks, scaleHex(c.doorCol, 0.9), { lod: 1 });
+  // Loft door: high on the gable wall, and only where it clears the main entrance below.
+  const loftY = out.wallTop - 1.6;
+  const entrance = (out.openings ?? []).find((o) => o.side === 0);
+  const clear = !entrance || Math.abs(entrance.x) > entrance.w / 2 + 0.75 || loftY > entrance.h + 0.35;
+  if (clear) k.box(0, loftY, c.d / 2 - c.t / 2, 1.4, 1.5, c.t + 0.06, Surf.Planks, scaleHex(c.doorCol, 0.9), { lod: 1 });
 }
 
 /** Arcaded market hall: pillars carrying a hip roof over open trading floor. */

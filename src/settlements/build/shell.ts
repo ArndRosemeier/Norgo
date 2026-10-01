@@ -108,6 +108,8 @@ export interface ShellOut {
   roof: number;
   gables: number[];
   door: number;
+  /** Ground-floor door openings: wall side (0 front, 2 back), centre x along that wall, width. */
+  openings?: { side: number; x: number; w: number; h: number }[];
   /** Height of the wall tops / roof base and the roof apex (local y). */
   wallTop: number;
   ridge: number;
@@ -227,7 +229,12 @@ export function windowAt(k: Kit, x: number, t: number, win: WindowLook, outerZ =
 }
 
 /** Timber framing on a wall face. Frame: wall centre line; spans x ∈ [−Lf/2, Lf/2]. */
-function framing(k: Kit, Lf: number, H: number, t: number, look: NonNullable<WallLook['frame']>, posts: number[], noBrace: [number, number][], railY: number) {
+/**
+ * Exposed timber framing on a wall face. `doors` are walk-through spans (door hole
+ * plus its frame posts): nothing may cross them — no fill posts, no sole plate,
+ * no rails or braces — or a visual beam would block the entrance.
+ */
+function framing(k: Kit, Lf: number, H: number, t: number, look: NonNullable<WallLook['frame']>, posts: number[], noBrace: [number, number][], railY: number, doors: [number, number][] = []) {
   const fw = look.w;
   const z = t / 2 + 0.015;
   const lod: Lod = 1;
@@ -239,17 +246,27 @@ function framing(k: Kit, Lf: number, H: number, t: number, look: NonNullable<Wal
     if (i < xs.length - 1) {
       const gap = xs[i + 1] - xs[i];
       const n = Math.floor(gap / 1.25);
-      for (let j = 1; j <= n; j++) all.push(xs[i] + (gap * j) / (n + 1));
+      for (let j = 1; j <= n; j++) {
+        const x = xs[i] + (gap * j) / (n + 1);
+        if (!doors.some(([u, v]) => x > u && x < v)) all.push(x);
+      }
     }
   }
   for (const x of all) k.box(x, 0, z, fw, H, 0.06, look.surf, look.col, { lod });
-  k.box(0, 0, z + 0.005, Lf, fw, 0.07, look.surf, look.col, { lod });
+  // Sole plate, interrupted by doorways.
+  let x0 = -Lf / 2;
+  for (const [u, v] of doors.slice().sort((a, b) => a[0] - b[0])) {
+    if (u - x0 > 0.02) k.box((x0 + u) / 2, 0, z + 0.005, u - x0, fw, 0.07, look.surf, look.col, { lod });
+    x0 = Math.max(x0, v);
+  }
+  if (Lf / 2 - x0 > 0.02) k.box((x0 + Lf / 2) / 2, 0, z + 0.005, Lf / 2 - x0, fw, 0.07, look.surf, look.col, { lod });
   k.box(0, H - fw, z + 0.005, Lf, fw, 0.07, look.surf, look.col, { lod });
   if (railY > 0.4) {
     for (let i = 0; i < all.length - 1; i++) {
       const a = all[i], b = all[i + 1];
       const mid = (a + b) / 2;
       if (noBrace.some(([u, v]) => mid > u && mid < v && railY < 2)) continue;
+      if (doors.some(([u, v]) => mid > u && mid < v)) continue;
       k.box(mid, railY, z, b - a, fw * 0.8, 0.06, look.surf, look.col, { lod });
     }
   }
@@ -259,6 +276,7 @@ function framing(k: Kit, Lf: number, H: number, t: number, look: NonNullable<Wal
     const mid = (a + b) / 2;
     if (b - a < 0.5 || b - a > 1.5) continue;
     if (noBrace.some(([u, v]) => b > u && a < v)) continue;
+    if (doors.some(([u, v]) => b > u && a < v)) continue;
     const dir = mid < 0 ? 1 : -1;
     const y0 = fw, y1 = H - fw;
     if (dir > 0) k.beam(a, y0, z, b, y1, z, fw * 0.8, look.surf, look.col, { lod, d: 0.06 });
@@ -292,6 +310,7 @@ export function buildShell(k: Kit, s: ShellSpec): ShellOut {
 
   const walls: number[][] = [];
   const slabs: number[] = [];
+  const openings: ShellOut['openings'] = [];
   let doorPiece = -1;
   for (let f = 0; f < s.floors; f++) {
     const look = s.walls[Math.min(f, s.walls.length - 1)];
@@ -334,6 +353,7 @@ export function buildShell(k: Kit, s: ShellSpec): ShellOut {
       if (f === 0 && side === 0 && s.door) holes.push({ x: s.door.x, w: s.door.w, h: s.door.h });
       if (f === 0 && side === 2 && s.backDoor) holes.push({ x: -s.door!.x * 0.5, w: 0.9 * s.scale, h: 2.0 * s.scale });
       wallBoxes(k, L, H, t, holes, look.surf, look.col);
+      if (f === 0) for (const o of holes) openings.push({ side, x: o.x, w: o.w, h: o.h });
       // Windows.
       const winXs: number[] = [];
       const blind = s.blind?.includes(side) && f === 0;
@@ -374,11 +394,14 @@ export function buildShell(k: Kit, s: ShellSpec): ShellOut {
           posts.push(x - ww / 2 - 0.16, x + ww / 2 + 0.16);
           noBrace.push([x - ww / 2 - 0.2, x + ww / 2 + 0.2]);
         }
+        const doors: [number, number][] = [];
         for (const o of holes) {
           posts.push(o.x - o.w / 2 - 0.2, o.x + o.w / 2 + 0.2);
           noBrace.push([o.x - o.w / 2 - 0.3, o.x + o.w / 2 + 0.3]);
+          // The walk-through span between the door's own frame posts.
+          doors.push([o.x - o.w / 2 - 0.2 + look.frame.w / 2, o.x + o.w / 2 + 0.2 - look.frame.w / 2]);
         }
-        framing(k, Lf, H, t, look.frame, posts, noBrace, s.win.sill - 0.12);
+        framing(k, Lf, H, t, look.frame, posts, noBrace, s.win.sill - 0.12, doors);
       }
       if (look.quoin && side % 2 === 0) {
         for (const sx of [-1, 1]) {
@@ -392,8 +415,17 @@ export function buildShell(k: Kit, s: ShellSpec): ShellOut {
           }
         }
       }
-      // Base course on the ground floor.
-      if (f === 0 && s.plinth > 0.05) k.box(0, 0, t / 2 + 0.02, L + (side % 2 ? 2 * t : 0.06), Math.min(0.5, s.plinth + 0.2), 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+      // Base course on the ground floor, interrupted by door openings.
+      if (f === 0 && s.plinth > 0.05) {
+        const bl = L + (side % 2 ? 2 * t : 0.06), bh = Math.min(0.5, s.plinth + 0.2);
+        let x0 = -bl / 2;
+        for (const o of holes.slice().sort((a, b) => a.x - b.x)) {
+          const u = o.x - o.w / 2, v = o.x + o.w / 2;
+          if (u - x0 > 0.02) k.box((x0 + u) / 2, 0, t / 2 + 0.02, u - x0, bh, 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+          x0 = Math.max(x0, v);
+        }
+        if (bl / 2 - x0 > 0.02) k.box((x0 + bl / 2) / 2, 0, t / 2 + 0.02, bl / 2 - x0, bh, 0.06, s.baseSurf, s.baseCol, { lod: 1 });
+      }
       k.pop();
     }
     walls.push(row);
@@ -503,7 +535,7 @@ export function buildShell(k: Kit, s: ShellSpec): ShellOut {
 
   // Keep rng advancing deterministically regardless of branches.
   rng.float();
-  return { found, walls, slabs, roof: roofPiece, gables, door: doorPiece, wallTop, ridge, topD };
+  return { found, walls, slabs, roof: roofPiece, gables, door: doorPiece, openings, wallTop, ridge, topD };
 }
 
 /**

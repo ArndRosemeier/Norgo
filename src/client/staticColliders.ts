@@ -220,7 +220,9 @@ export function capsulePushOut(px: number, py: number, pz: number, r: number, h:
   const lx0 = px - c.pos[0], lz0 = pz - c.pos[2];
   const lx = lx0 * cs - lz0 * sn, lz = lx0 * sn + lz0 * cs;
   const boxBot = c.pos[1] - half[1], boxTop = c.pos[1] + half[1];
-  if (py + h < boxBot || py > boxTop) return null;
+  // Standing on (or a hair above) the top is not an overlap: after a step-up the feet sit exactly
+  // at boxTop, and treating that as inside pushed the player back off the step every frame.
+  if (py + h < boxBot || py >= boxTop - 0.002) return null;
   const qx = Math.max(-half[0], Math.min(half[0], lx));
   const qz = Math.max(-half[2], Math.min(half[2], lz));
   let ddx = lx - qx, ddz = lz - qz;
