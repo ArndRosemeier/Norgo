@@ -11,6 +11,7 @@ import type { UiHost } from '../host';
 import { h } from '../dom';
 import { DAMAGE_COLOR, RARITY_COLOR } from '../format';
 import type { Rarity } from '../../items/types';
+import { projectToNdc } from '../../render/project';
 
 const v = new THREE.Vector3();
 
@@ -79,8 +80,8 @@ export class Nameplates {
       const { s, d } = cand[i];
       const view = ctx.views.get(s.id);
       const head = (view?.headHeight ?? (s.kind === 'item' ? 0.3 : 1.8)) + 0.32;
-      v.set(s.pos[0], s.pos[1] + head, s.pos[2]).project(cam);
-      if (v.z > 1 || v.z < -1 || v.x < -1.2 || v.x > 1.2 || v.y < -1.2 || v.y > 1.3) continue;
+      if (!projectToNdc(v.set(s.pos[0], s.pos[1] + head, s.pos[2]), cam)) continue;
+      if (v.x < -1.2 || v.x > 1.2 || v.y < -1.2 || v.y > 1.3) continue;
       const p = this.plates[used++];
       const x = (v.x * 0.5 + 0.5) * W, y = (-v.y * 0.5 + 0.5) * H;
       const scale = Math.max(0.62, Math.min(1.05, 14 / (d + 6)));
@@ -200,8 +201,7 @@ export class FloatingNumbers {
         f.el.style.display = 'none';
         continue;
       }
-      v.set(f.pos[0], f.pos[1], f.pos[2]).project(cam);
-      if (v.z > 1) {
+      if (!projectToNdc(v.set(f.pos[0], f.pos[1], f.pos[2]), cam)) {
         f.el.style.opacity = '0';
         continue;
       }

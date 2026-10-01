@@ -73,8 +73,14 @@ export class ShaderGate {
   private readyDepth = new WeakSet<THREE.Material>();
   /** Stand-ins for three's internal shadow depth material (same program key). */
   private depthStandIns = new WeakMap<THREE.Material, THREE.MeshDepthMaterial>();
-  /** Shadow maps render into a target: programs there use no tone mapping and linear output. */
-  private shadowTarget = new THREE.WebGLRenderTarget(1, 1);
+  /**
+   * Stand-in render target for compiling. Programs bake the target into their key:
+   * drawing into a target means linear output and no tone mapping. Shadow maps always
+   * render into one, and so does the main scene whenever three's output buffer is in use
+   * (tone mapping or effects): it draws the scene into an internal HDR target and applies
+   * tone mapping and colour conversion only in the final pass.
+   */
+  private offscreen = new THREE.WebGLRenderTarget(1, 1);
 
   constructor(private core: RenderCore) {
     activeGate = this;
@@ -173,13 +179,23 @@ export class ShaderGate {
         proxies.children.push(proxy);
       }
     });
-    const jobs: Promise<unknown>[] = [r.compileAsync(obj, this.core.camera, this.core.scene)];
+    // Main programs: compiled for whatever the scene really renders into (see `offscreen`).
+    const jobs: Promise<unknown>[] = [];
+    {
+      const prev = r.getRenderTarget();
+      if (this.core.usesOutputBuffer()) r.setRenderTarget(this.offscreen);
+      try {
+        jobs.push(r.compileAsync(obj, this.core.camera, this.core.scene));
+      } finally {
+        r.setRenderTarget(prev);
+      }
+    }
     if (proxies.children.length) {
       // The shadow pass draws without a scene: no fog, and into a render target.
       const scene = this.core.scene;
       const prev = r.getRenderTarget();
       const fog = scene.fog;
-      r.setRenderTarget(this.shadowTarget);
+      r.setRenderTarget(this.offscreen);
       scene.fog = null;
       try {
         jobs.push(r.compileAsync(proxies, this.core.camera, scene));
@@ -255,6 +271,17 @@ export class RenderCore {
     this.shaders = new ShaderGate(this);
   }
 
+  private effectCount = 0;
+
+  /**
+   * Whether three renders the scene through its output buffer (an internal HDR target,
+   * tone-mapped in a final pass) rather than straight to the canvas. Mirrors
+   * WebGLOutput.begin(): used whenever tone mapping is on or any effect is set.
+   */
+  usesOutputBuffer(): boolean {
+    return this.renderer.toneMapping !== THREE.NoToneMapping || this.effectCount > 0;
+  }
+
   private applyEffects(w: number, h: number) {
     const effects: unknown[] = [];
     if (this.settings.bloom) {
@@ -263,6 +290,7 @@ export class RenderCore {
     } else this.bloom = null;
     if (this.settings.antialias) effects.push(new SMAAPass());
     (this.renderer as unknown as { setEffects(e: unknown[]): void }).setEffects(effects);
+    this.effectCount = effects.length;
   }
 
   setBloomStrength(s: number) {
