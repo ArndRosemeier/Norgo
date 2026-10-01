@@ -134,7 +134,9 @@ export class PlayerController {
     this.waterLevel = this.waterSurfaceAt(this.pos.x, this.pos.y, this.pos.z);
     const depth = this.waterLevel - this.pos.y;
     const waterwalk = fx.has('waterwalk');
-    this.swimming = !waterwalk && depth > this.height * 0.62;
+    // Hysteresis: start swimming in chest-deep water, keep swimming while floating higher
+    // (front crawl lifts the body), stop only where it gets genuinely shallow.
+    this.swimming = !waterwalk && depth > this.height * (this.swimming ? 0.36 : 0.62);
 
     // --- desired velocity
     let speed = 5.0;
@@ -182,8 +184,13 @@ export class PlayerController {
         this.vel.set(-fdx * 3.5, BASE_JUMP_V * 0.8, -fdz * 3.5);
       }
     } else if (this.swimming) {
-      // Buoyancy keeps the head above water; crouch dives, jump rises.
-      const targetY = this.waterLevel - this.height * 0.72;
+      // Buoyancy: treading water floats upright with head and shoulders out; swimming forward
+      // the body lies horizontal (pivoting at the hips, see Animator.swim), so the hips must
+      // float just under the surface — otherwise the whole body is submerged and it reads as
+      // diving. Crouch dives, jump rises.
+      const hs = Math.hypot(this.vel.x, this.vel.z);
+      const crawl = hs <= 0.2 ? 0 : hs >= 0.8 ? 1 : ((hs - 0.2) / 0.6) ** 2 * (3 - 2 * ((hs - 0.2) / 0.6));
+      const targetY = this.waterLevel - this.height * (0.72 - 0.2 * crawl);
       let vy = (targetY - this.pos.y) * 3;
       if (input.crouch) vy = -2.2;
       if (input.jump) vy = 2.5;
