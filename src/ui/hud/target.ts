@@ -13,7 +13,10 @@ import { speciesList, type FaunaRole, type Species, type Temperament } from '../
 import type { UiHost } from '../host';
 import { h } from '../dom';
 import { fmtDist } from '../format';
-import { keyLabel, settingsStore } from '../settings';
+import { platform } from '../../core/platform';
+import { glyphSvg } from '../icons';
+import { howText } from '../controls';
+import { command } from '../../client/commands';
 
 const ROLE_LABEL: Record<FaunaRole, string> = {
   smallcritter: 'Critter', grazer: 'Grazer', predator: 'Predator', bird: 'Bird', insect: 'Insect', fish: 'Fish',
@@ -80,6 +83,15 @@ export class TargetFrame {
     this.update(0);
   }
 
+  /** "Esc clears · Shift+Tab back" — or the touch gestures — from the command registry. */
+  refreshHint() {
+    if (platform.inputMode === 'touch') {
+      const g = (id: 'targetClear' | 'targetPrev') => (command(id).touch.gesture === 'swipeLeft' ? 'swipe left' : command(id).touch.gesture ?? '');
+      this.hint.innerHTML = `${glyphSvg(command('target').glyph, 11)} ${g('targetClear')}: clear · ${g('targetPrev')}: back`;
+    }
+    else this.hint.textContent = `${howText('targetClear')} clears · ${howText('targetPrev')} back`;
+  }
+
   update(dt: number) {
     const t = this.info;
     if (!t) return;
@@ -94,7 +106,6 @@ export class TargetFrame {
       const icon = s.flags & EntFlag.Questgiver ? ' !' : s.flags & EntFlag.Merchant ? ' ¤' : '';
       this.name.textContent = (s.name ?? (s.kind === 'creature' ? 'Creature' : 'Stranger')) + icon;
       this.sub.textContent = this.subtitle(s);
-      this.hint.textContent = `Esc clears · Shift+${keyLabel(settingsStore.get().controls.targetKey || 'Tab')} back`;
     }
     // Health: fill snaps, the pale trail eases down behind it.
     const frac = s.maxHp > 0 ? Math.max(0, Math.min(1, s.hp / s.maxHp)) : 0;

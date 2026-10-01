@@ -6,6 +6,7 @@
 import { Panel, type UiHost } from '../host';
 import { h, setChildren } from '../dom';
 import { tooltip, drag, contextMenu, tabs, type MenuItem } from '../widgets';
+import { onDouble, onSecondary, verbs } from '../gestures';
 import { itemTooltip } from '../tooltips';
 import { iconForItem, applyItemIcon } from '../hud/hud';
 import { itemCategory, itemSlots, itemWeight, itemDefOf } from '../data';
@@ -67,18 +68,17 @@ export class InventoryPanel extends Panel {
       this.slotEls.set(s, el);
       tooltip.bind(el, () => {
         const it = this.player()?.equipment[s];
-        return it ? itemTooltip(it, null, { label: SLOT_LABEL[s], hint: 'Drag to inventory or double-click to unequip' }) : h('div', null, h('div', { class: 'n-tip-title', text: SLOT_LABEL[s] }), h('div', { class: 'n-tip-sub', text: 'Empty' }));
+        return it ? itemTooltip(it, null, { label: SLOT_LABEL[s], hint: `Drag to inventory or ${verbs.double.toLowerCase()} to unequip` }) : h('div', null, h('div', { class: 'n-tip-title', text: SLOT_LABEL[s] }), h('div', { class: 'n-tip-sub', text: 'Empty' }));
       }, true);
       drag.target(el, (p) => p.kind === 'item' && p.from === 'inventory' && this.fits(p.uid, s), (p) => p.kind === 'item' && this.equip(p.uid, s));
       drag.source(el, () => {
         const it = this.player()?.equipment[s];
         return it ? { kind: 'item', uid: it.uid, from: 'equipment', slot: s } : null;
       }, () => (el.querySelector('.n-eq-img') as HTMLImageElement).src);
-      el.addEventListener('dblclick', () => this.player()?.equipment[s] && this.unequip(s));
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
+      onDouble(el, () => this.player()?.equipment[s] && this.unequip(s));
+      onSecondary(el, (x, y) => {
         const it = this.player()?.equipment[s];
-        if (it) contextMenu(e.clientX, e.clientY, [{ label: 'Unequip', icon: glyphSvg('arrow', 14), action: () => this.unequip(s) }]);
+        if (it) contextMenu(x, y, [{ label: 'Unequip', icon: glyphSvg('arrow', 14), action: () => this.unequip(s) }]);
       });
       el.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && this.player()?.equipment[s]) this.unequip(s);
@@ -315,24 +315,21 @@ export class InventoryPanel extends Panel {
     const p = this.player()!;
     tooltip.bind(el, () => itemTooltip(it, p.equipment, { hint: this.hintFor(it) }), true);
     drag.source(el, () => ({ kind: 'item', uid: it.uid, from: 'inventory' }), () => iconForItem(it));
-    el.addEventListener('dblclick', () => this.primary(it));
+    onDouble(el, () => this.primary(it));
     el.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.primary(it);
       else if (e.key === 'Delete') this.host.ctx.send({ t: 'dropItem', uid: it.uid, count: it.count });
     });
-    el.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      contextMenu(e.clientX, e.clientY, this.menuFor(it));
-    });
+    onSecondary(el, (x, y) => contextMenu(x, y, this.menuFor(it)));
     return el;
   }
 
   private hintFor(it: ItemInstance): string {
     const slots = itemSlots(it);
     const c = itemCategory(it);
-    if (slots.length) return 'Double-click or drag to equip · right-click for options';
-    if (c === 'consumable' || c === 'food') return 'Double-click to use · drag onto the hotbar';
-    return 'Right-click for options';
+    if (slots.length) return `${verbs.double} or drag to equip · ${verbs.secondary} for options`;
+    if (c === 'consumable' || c === 'food') return `${verbs.double} to use · drag onto the hotbar · ${verbs.secondary} for options`;
+    return `${verbs.secondary.charAt(0).toUpperCase()}${verbs.secondary.slice(1)} for options`;
   }
 
   private primary(it: ItemInstance) {

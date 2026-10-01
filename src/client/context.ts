@@ -16,6 +16,7 @@ import type { DialogView } from '../dialog/types';
 import type { GmMessage } from '../gm/types';
 import type { ItemInstance } from '../items/types';
 import type { Disposition } from './targetRules';
+import type { VirtualControls } from './input';
 
 // ------------------------------------------------------------------ entity views
 
@@ -205,4 +206,9 @@ export interface ClientContext {
   /** Input focus: when a UI panel captures input, gameplay input is suspended. */
   setUiCapture(captured: boolean): void;
   readonly uiCaptured: boolean;
+  /**
+   * On-screen controls (touch thumb-stick, buttons, tappable hotbar) feeding the same
+   * gameplay actions as keyboard and mouse. Absent in mock contexts (sandboxes).
+   */
+  readonly controls?: VirtualControls;
 }

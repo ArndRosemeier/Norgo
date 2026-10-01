@@ -4,6 +4,7 @@
  * manager (used for inventory ↔ equipment ↔ hotbar ↔ skills book).
  */
 import { h, placeFloating, clear } from './dom';
+import { onHold, claimPointer, pointerClaim, TOUCH_SLOP } from './gestures';
 
 export function corners(): HTMLElement[] {
   return ['tl', 'tr', 'bl', 'br'].map((c) => h('i', { class: `n-corner ${c}` }));
@@ -113,6 +114,8 @@ export function tabs<T extends string>(options: { id: T; label: string }[], valu
 class TooltipManager {
   private el: HTMLDivElement | null = null;
   private owner: Element | null = null;
+  /** Shown by a long-press (touch): stays put until the next tap anywhere else. */
+  private pinned = false;
   private x = 0;
   private y = 0;
 
@@ -121,42 +124,92 @@ class TooltipManager {
       this.el = h('div', { class: 'n-tooltip n-frame' });
       document.body.appendChild(this.el);
       window.addEventListener('pointermove', (e) => {
+        if (e.pointerType !== 'mouse') return;
         this.x = e.clientX;
         this.y = e.clientY;
-        if (this.owner && this.el?.classList.contains('show')) placeFloating(this.el, this.x, this.y, 18);
+        if (this.owner && !this.pinned && this.el?.classList.contains('show')) placeFloating(this.el, this.x, this.y, 18);
       }, { passive: true });
+      // A pinned (touch) tooltip goes away with the next touch outside it.
+      window.addEventListener('pointerdown', (e) => {
+        if (this.pinned && !this.el?.contains(e.target as Node)) this.hide();
+      }, { capture: true, passive: true });
     }
     return this.el;
   }
 
-  /** Show content near the cursor. `wide` = several cards side by side (comparisons). */
-  show(owner: Element, content: Node | Node[], wide = false): void {
+  private fill(owner: Element, content: Node | Node[], wide: boolean): HTMLDivElement {
     const el = this.ensure();
     this.owner = owner;
     clear(el);
     el.className = wide ? 'n-tooltip wide' : 'n-tooltip n-frame';
     for (const n of Array.isArray(content) ? content : [content]) el.appendChild(n);
     el.classList.add('show');
-    placeFloating(el, this.x, this.y, 18);
+    return el;
+  }
+
+  /** Show content near the cursor. `wide` = several cards side by side (comparisons). */
+  show(owner: Element, content: Node | Node[], wide = false): void {
+    this.pinned = false;
+    placeFloating(this.fill(owner, content, wide), this.x, this.y, 18);
+  }
+
+  /** Pin content near a point until the next tap elsewhere (touch: a map marker under the finger). */
+  showAt(owner: Element, content: Node | Node[], x: number, y: number, wide = false): void {
+    placeFloating(this.fill(owner, content, wide), x, y, 26);
+    this.pinned = true;
+  }
+
+  /** Show content beside an element (touch: a finger would cover a cursor-placed card). */
+  showBeside(owner: Element, content: Node | Node[], wide = false): void {
+    const el = this.fill(owner, content, wide);
+    this.pinned = true;
+    const r = owner.getBoundingClientRect();
+    const w = el.offsetWidth, hgt = el.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+    // Prefer the left side: a context menu opened by the same long-press unfolds to the right.
+    let px = r.left - w - 10;
+    if (px < 6) px = r.right + 10;
+    let py = r.top + r.height / 2 - hgt / 2;
+    if (px + w > vw - 6) {
+      // No room on either side: centre it above (or below) the element.
+      px = Math.max(6, Math.min(vw - w - 6, r.left + r.width / 2 - w / 2));
+      py = r.top - hgt - 10 >= 6 ? r.top - hgt - 10 : r.bottom + 10;
+    }
+    py = Math.max(6, Math.min(vh - hgt - 6, py));
+    el.style.transform = `translate(${px | 0}px, ${py | 0}px)`;
   }
 
   hide(owner?: Element): void {
     if (owner && owner !== this.owner) return;
     this.owner = null;
+    this.pinned = false;
     this.el?.classList.remove('show');
   }
 
-  /** Bind hover behaviour: `build` is called lazily on enter. */
-  bind(target: HTMLElement, build: () => Node | Node[] | null, wide = false): void {
+  /**
+   * Bind details to an element: hover with a mouse, long-press on touch (dismissed by the
+   * next tap elsewhere). `build` is called lazily. `holdWhen` can veto the long-press (the
+   * hotbar charges abilities on hold during play).
+   */
+  bind(target: HTMLElement, build: () => Node | Node[] | null, wide = false, opts: { holdWhen?: () => boolean } = {}): void {
     target.addEventListener('pointerenter', (e) => {
+      if (e.pointerType !== 'mouse') return;
       this.x = e.clientX;
       this.y = e.clientY;
       if (drag.active) return;
       const c = build();
       if (c) this.show(target, c, wide);
     });
-    target.addEventListener('pointerleave', () => this.hide(target));
-    target.addEventListener('pointerdown', () => this.hide(target));
+    target.addEventListener('pointerleave', (e) => {
+      if (e.pointerType === 'mouse') this.hide(target);
+    });
+    target.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'mouse') this.hide(target);
+    });
+    onHold(target, () => {
+      if (drag.active) return;
+      const c = build();
+      if (c) this.showBeside(target, c, wide);
+    }, opts.holdWhen);
   }
 }
 
@@ -283,42 +336,60 @@ class DragManager {
     return () => this.targets.delete(el);
   }
 
-  /** Make `el` a drag source. Drag starts after a few pixels of movement (so clicks still work). */
+  /**
+   * Make `el` a drag source. The drag starts after a few pixels of movement, so clicks still
+   * work; on touch a still finger becomes a long-press instead (see gestures.ts), and a
+   * vertical swipe inside a scrolling list scrolls it (CSS `touch-action: pan-y` on sources;
+   * the browser then cancels the pointer).
+   */
   source(el: HTMLElement, payload: () => DragPayload | null, icon: () => string, onNowhere?: DropHandler): void {
+    el.classList.add('n-drag-src');
     el.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return;
-      const sx = e.clientX, sy = e.clientY;
+      if (e.button !== 0 || !e.isPrimary) return;
+      const id = e.pointerId, sx = e.clientX, sy = e.clientY;
+      const slop = e.pointerType === 'mouse' ? 5 : TOUCH_SLOP - 2;
       const move = (m: PointerEvent) => {
-        if (Math.hypot(m.clientX - sx, m.clientY - sy) < 5) return;
+        if (m.pointerId !== id || Math.hypot(m.clientX - sx, m.clientY - sy) < slop) return;
         cleanup();
+        // A long-press already fired for this finger: it showed details, it does not drag.
+        if (pointerClaim(id) === 'hold') return;
         const p = payload();
-        if (p) this.start(p, icon(), m, onNowhere ?? null);
+        if (p && claimPointer(id, 'drag')) this.start(p, icon(), m, onNowhere ?? null);
       };
       const cleanup = () => {
         window.removeEventListener('pointermove', move);
         window.removeEventListener('pointerup', cleanup);
+        window.removeEventListener('pointercancel', cleanup);
       };
       window.addEventListener('pointermove', move);
       window.addEventListener('pointerup', cleanup);
+      window.addEventListener('pointercancel', cleanup);
     });
   }
 
   private start(p: DragPayload, iconUrl: string, e: PointerEvent, onNowhere: DropHandler | null) {
     tooltip.hide();
+    closeContextMenu();
     this.active = p;
     this.onNowhere = onNowhere;
     this.ghost = h('div', { class: 'n-drag-ghost' }, h('img', { attrs: { src: iconUrl, alt: '' } }));
     document.body.appendChild(this.ghost);
     document.body.style.cursor = 'grabbing';
     for (const [el, t] of this.targets) if (el.isConnected && t.accept(p)) el.classList.add('n-drop-ok');
-    const move = (m: PointerEvent) => this.move(m);
+    const id = e.pointerId;
+    const move = (m: PointerEvent) => {
+      if (m.pointerId === id) this.move(m);
+    };
     const up = (u: PointerEvent) => {
+      if (u.pointerId !== id) return;
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      this.end(u);
+      window.removeEventListener('pointercancel', up);
+      this.end(u, u.type === 'pointercancel');
     };
     window.addEventListener('pointermove', move);
     window.addEventListener('pointerup', up);
+    window.addEventListener('pointercancel', up);
     this.move(e);
   }
 
@@ -349,16 +420,21 @@ class DragManager {
     }
   }
 
-  private end(e: PointerEvent) {
+  private end(e: PointerEvent, cancelled = false) {
     const p = this.active!;
     this.ghost?.remove();
     this.ghost = null;
     document.body.style.cursor = '';
     for (const el of this.targets.keys()) el.classList.remove('n-drop-ok', 'n-drop-hover');
     this.hover = null;
+    this.active = null;
+    if (cancelled) {
+      // The browser took the pointer (system gesture): abandon the drag, drop nothing.
+      this.onNowhere = null;
+      return;
+    }
     const t = this.findTarget(e.clientX, e.clientY);
     const entry = t ? this.targets.get(t)! : null;
-    this.active = null;
     if (entry && entry.accept(p)) entry.drop(p);
     else if (!t) this.onNowhere?.(p);
     this.onNowhere = null;

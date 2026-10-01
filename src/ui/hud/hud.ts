@@ -12,7 +12,10 @@ import { h, setChildren } from '../dom';
 import { abilityOrStub, skillDef, itemCategory } from '../data';
 import { abilityIcon, effectIcon, isHarmfulEffect, itemFallbackIcon, glyphSvg } from '../icons';
 import { itemIconUrl, whenIconReady, iconKey } from '../../items/client/icons';
-import { tooltip, drag, type DragPayload } from '../widgets';
+import { tooltip, drag, contextMenu, type DragPayload } from '../widgets';
+import { onSecondary, touchMode } from '../gestures';
+import { HOTBAR_ACTIONS, command, primaryKey } from '../../client/commands';
+import { currentOverrides } from '../controls';
 import { abilityCard, itemTooltip, effectCard } from '../tooltips';
 import { fmtClock, dayPhase, fmtDist, fmtDuration, cap, titleize } from '../format';
 import type { ItemInstance } from '../../items/types';
@@ -143,6 +146,7 @@ interface Slot {
   count: HTMLElement;
   cd: HTMLElement;
   cdText: HTMLElement;
+  key: HTMLElement;
   value: string | null;
   cdTotal: number;
   lastCd: string;
@@ -160,11 +164,15 @@ export class Hotbar {
       const count = h('span', { class: 'n-slot-count' });
       const cd = h('i', { class: 'n-slot-cd' });
       const cdText = h('span', { class: 'n-slot-cdtext' });
-      const el = h('div', { class: 'n-slot n-interactive empty' }, img, cd, cdText, count, h('span', { class: 'n-slot-key', text: String((i + 1) % 10) }));
-      const slot: Slot = { el, img, count, cd, cdText, value: null, cdTotal: 0, lastCd: '' };
+      const key = h('span', { class: 'n-slot-key', text: primaryKey(HOTBAR_ACTIONS[i], currentOverrides()) });
+      const el = h('div', { class: 'n-slot n-interactive empty' }, img, cd, cdText, count, key);
+      const slot: Slot = { el, img, count, cd, cdText, key, value: null, cdTotal: 0, lastCd: '' };
       this.slots.push(slot);
       this.el.append(el);
-      tooltip.bind(el, () => this.tooltipFor(slot));
+      // During play a finger on a slot uses it (hold = charge); with a panel open it inspects.
+      const inspecting = () => this.host.ctx.uiCaptured || !this.host.ctx.controls;
+      tooltip.bind(el, () => this.tooltipFor(slot), false, { holdWhen: inspecting });
+      this.bindTouchUse(el, i, inspecting);
       drag.target(el, (p) => p.kind === 'ability' || p.kind === 'hotbar' || (p.kind === 'item' && this.usable(p.uid)), (p) => this.drop(i, p));
       drag.source(
         el,
@@ -173,11 +181,39 @@ export class Hotbar {
         // Dragged off the bar: clear the slot.
         (p) => p.kind === 'hotbar' && this.set(p.slot, null),
       );
-      el.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (slot.value) this.set(i, null);
-      });
+      onSecondary(el, (x, y, source) => {
+        if (!slot.value) return;
+        // Right-click clears at once (as always); a long-press asks first (it also shows details).
+        if (source === 'mouse') this.set(i, null);
+        else contextMenu(x, y, [{ label: 'Clear slot', icon: glyphSvg('cross', 14), danger: true, action: () => this.set(i, null) }]);
+      }, inspecting);
     }
+  }
+
+  /** Touch: press the slot's hotbar action on touch-down, release on lift (charged abilities). */
+  private bindTouchUse(el: HTMLElement, i: number, inspecting: () => boolean) {
+    el.addEventListener('pointerdown', (e) => {
+      const controls = this.host.ctx.controls;
+      if (e.pointerType === 'mouse' || inspecting() || !controls) return;
+      e.preventDefault();
+      el.setPointerCapture(e.pointerId);
+      const id = e.pointerId, action = HOTBAR_ACTIONS[i];
+      controls.press(action);
+      this.flash(i);
+      const up = (u: PointerEvent) => {
+        if (u.pointerId !== id) return;
+        el.removeEventListener('pointerup', up);
+        el.removeEventListener('pointercancel', up);
+        controls.release(action);
+      };
+      el.addEventListener('pointerup', up);
+      el.addEventListener('pointercancel', up);
+    });
+  }
+
+  /** Key labels follow the registry (and rebinds). */
+  refreshKeys() {
+    for (let i = 0; i < this.slots.length; i++) this.slots[i].key.textContent = primaryKey(HOTBAR_ACTIONS[i], currentOverrides());
   }
 
   private usable(uid: string): boolean {
@@ -214,11 +250,11 @@ export class Hotbar {
     const ctx = this.host.ctx;
     if (slot.value.startsWith('item:')) {
       const it = ctx.findItem(slot.value.slice(5));
-      return it ? itemTooltip(it, null, { hint: 'Press the slot key to use · right-click to clear' }) : null;
+      return it ? itemTooltip(it, null, { hint: touchMode() ? 'In play: tap to use · drag to rearrange' : `Press ${slot.key.textContent} to use · right-click to clear` }) : null;
     }
     const def = abilityOrStub(slot.value);
     const left = (ctx.state.player.cooldowns?.[slot.value] ?? 0) - this.host.serverNow();
-    return abilityCard(def, { unlocked: true, cooldownLeft: left, hint: 'Right-click to clear · drag to rearrange' });
+    return abilityCard(def, { unlocked: true, cooldownLeft: left, hint: touchMode() ? 'In play: tap to use, hold to charge · drag to rearrange' : 'Right-click to clear · drag to rearrange' });
   }
 
   flash(i: number) {
@@ -451,8 +487,12 @@ export class Crosshair {
       name = s.item ? `${s.item.name}${s.item.count > 1 ? ` ×${s.item.count}` : ''}` : s.name ?? '';
       hostile = (s.flags & EntFlag.Hostile) !== 0;
     } else if (f.kind === 'object') name = '';
+    // Terrain is dug with the attack command; everything else is used with interact.
+    const cmd = f.kind === 'terrain' ? 'attack' : 'interact';
     setChildren(this.prompt,
-      h('span', { class: 'n-key', text: 'E' }),
+      touchMode()
+        ? h('span', { class: 'n-key n-key-glyph', html: glyphSvg(command(cmd).glyph, 13) })
+        : h('span', { class: 'n-key', text: primaryKey(cmd, currentOverrides()) }),
       h('span', { class: 'n-prompt-verb', text: f.prompt }),
       name ? h('span', { class: 'n-prompt-name', text: name }) : null,
     );

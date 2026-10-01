@@ -11,7 +11,10 @@
  *
  *  - Manifest loaded once (graceful no-op when missing/malformed); buffers are
  *    fetched + decoded lazily (only the chosen variation of each layer), the most
- *    likely next sets are preloaded, at most MAX_SETS sets stay resident (LRU).
+ *    likely next sets are preloaded, at most `budgets.stemSets` sets stay resident (LRU).
+ *  - Codec gate: the stems are Ogg Opus. Where decoding is uncertain (WebKit) one file is
+ *    test-decoded once (`codecProbe.ts`); if that fails the layer stays silent for the
+ *    session (no fetches, no retries) and the generative score plays alone.
  *  - All layers of a set share one timeline (t0 + offset): late-loading layers
  *    join phase-aligned, so locked layers (texture, perc) never drift apart.
  *  - Set changes crossfade (exploration ≈5–7 s, combat entry ≈1.2 s on the next
@@ -24,18 +27,20 @@
  * Routing tables, hysteresis and the tuning policy live in `stemRouting.ts`.
  */
 import type { AudioEngine } from './engine';
+import { budgets } from '../core/budgets';
+import { probeOggOpus, type CodecResult } from './codecProbe';
 import type { ScoreAccompaniment } from './music';
 import {
   StemSelector, StemManifest, StemSetInfo, StemLayer, StemContext, StemCategory, StemTuningPolicy, StemWorldFlavor,
   STEM_LAYERS, parseManifest, categoryOfSet, preferredVariation, RACE_STEM_SET, SPECIAL_SETS,
 } from './stemRouting';
 
-/** Resident decoded sets (≈15 MB per 38 s stereo stem → a full set is 60–90 MB). */
-const MAX_SETS = 3;
-/** Hard cap on decoded bytes (melody variations accumulate). */
-const MAX_BYTES = 240 * 1024 * 1024;
-const MAX_MELODY_RESIDENT = 2;
-const MAX_LOADS = 2;
+/*
+ * Residency limits come from the device budget (`src/core/budgets.ts`): desktops keep 3 decoded
+ * sets (≈15 MB per 38 s stereo stem → a full set is 60–90 MB) under a 240 MB cap; tablets keep
+ * 2 sets under ≈130 MB, one melody variation per set and one decode at a time (Safari tabs are
+ * killed far below the device's RAM).
+ */
 /** Overall stem level into the music bus (stems are loudness-normalised to ≈ −21 dBFS RMS per layer). */
 const STEM_LEVEL = 0.85;
 const LOOKAHEAD = 0.06;
@@ -130,6 +135,8 @@ function musicBase(): string {
 
 export interface StemStatus {
   enabled: boolean;
+  /** Can this browser decode the stems? 'pending' until the manifest is in and the check ran. */
+  codec: 'pending' | CodecResult['verdict'];
   policy: StemTuningPolicy;
   manifest: 'loading' | 'ready' | 'missing' | 'idle';
   sets: string[];
@@ -176,6 +183,28 @@ export class StemMusic {
   private clock = 0;
   private suppressUntil = 0;
   private readonly hasFn = (id: string) => this.has(id);
+  /** Codec check (once per session): null until it has finished. */
+  codec: CodecResult | null = null;
+  private codecStarted = false;
+
+  /** Stems can play: switched on, manifest loaded, and the browser decodes Ogg Opus. */
+  private get usable(): boolean {
+    return this.enabled && !!this.manifest && this.codec?.verdict === 'ok';
+  }
+
+  /** Start the codec check with a real stem from the manifest (first set's first drone). */
+  private checkCodec() {
+    if (this.codecStarted || !this.manifest) return;
+    const first = Object.values(this.manifest.sets)[0];
+    const sample = first?.layers.drone[0] ?? first?.layers.perc[0];
+    if (!sample) return;
+    this.codecStarted = true;
+    void probeOggOpus(musicBase() + sample).then((r) => {
+      this.codec = r;
+      // Nothing may have been fetched yet (the gate holds requests back), but be thorough.
+      if (r.verdict !== 'ok') this.bufs.clear();
+    });
+  }
 
   constructor(private engine: AudioEngine, readonly flavor: StemWorldFlavor, readonly policy: StemTuningPolicy) {
     this.selector = new StemSelector(flavor);
@@ -198,6 +227,8 @@ export class StemMusic {
         // Keep a previously good manifest if a refresh comes back broken (file mid-write).
         if (m) this.manifest = m;
         this.manifestState = this.manifest ? 'ready' : 'missing';
+        // Codec check right away (no gesture needed), so the verdict is in before audio unlocks.
+        this.checkCodec();
       })
       .catch(() => {
         // 404 / dev-server HTML fallback / malformed JSON: the game simply runs without stems.
@@ -284,8 +315,8 @@ export class StemMusic {
 
   private pump() {
     const ctx = this.ctx;
-    if (!ctx || !this.queueDirty) return;
-    while (this.loading < MAX_LOADS) {
+    if (!ctx || !this.queueDirty || this.codec?.verdict !== 'ok') return;
+    while (this.loading < budgets.stemLoads) {
       let best: BufEntry | null = null;
       for (const e of this.bufs.values()) if (e.state === 'queued' && (!best || e.prio < best.prio)) best = e;
       if (!best) {
@@ -338,7 +369,7 @@ export class StemMusic {
     if (this.forced) prot.add(this.forced);
     if (this.target) prot.add(this.target);
     for (const p of this.preloadIds) prot.add(p);
-    while (use.size > MAX_SETS || bytes > MAX_BYTES) {
+    while (use.size > budgets.stemSets || bytes > budgets.stemBytes) {
       let victim: string | null = null;
       let t = Infinity;
       for (const [id, lu] of use) if (!prot.has(id) && lu < t) {
@@ -354,7 +385,7 @@ export class StemMusic {
     }
   }
 
-  /** Keep at most MAX_MELODY_RESIDENT melody buffers per set (drop the LRU idle one). */
+  /** Keep at most `budgets.stemMelodies` melody buffers per set (drop the LRU idle one). */
   private trimMelodies(s: StemSetInfo, keep: string) {
     let n = 0;
     let lru: BufEntry | null = null;
@@ -365,7 +396,7 @@ export class StemMusic {
       const playing = this.slots.some((sl) => sl.layers[L_MEL].path === p && sl.layers[L_MEL].src);
       if (p !== keep && !playing && (!lru || e.lastUse < lru.lastUse)) lru = e;
     }
-    if (n > MAX_MELODY_RESIDENT && lru) this.bufs.delete(lru.path);
+    if (n > budgets.stemMelodies && lru) this.bufs.delete(lru.path);
   }
 
   // ================================================================ graph
@@ -558,10 +589,12 @@ export class StemMusic {
   update(dt: number, c: StemContext): void {
     this.clock += dt;
     if (this.manifestState === 'idle') this.loadManifest();
+    if (this.manifest && !this.codecStarted) this.checkCodec();
     const sel = this.selector;
     const context = sel.update(dt, c, this.hasFn);
-    // Sets appear progressively while the pipeline runs: re-check the manifest now and then.
-    if (sel.wantedMissing && this.manifestState === 'ready' && this.clock - this.manifestAt > MANIFEST_RETRY && this.manifestTries < 40) this.loadManifest();
+    // Sets appear progressively while the pipeline runs: re-check the manifest now and then
+    // (pointless when the browser can't decode them).
+    if (sel.wantedMissing && this.manifestState === 'ready' && this.codec?.verdict === 'ok' && this.clock - this.manifestAt > MANIFEST_RETRY && this.manifestTries < 40) this.loadManifest();
     const acc = this.acc;
     if (!this.engine.running || !this.ensureGraph()) {
       acc.active = false;
@@ -573,7 +606,7 @@ export class StemMusic {
 
     // ---- what should play
     let want: string | null = null;
-    if (this.enabled && this.manifest) {
+    if (this.usable) {
       if (this.forced && this.setInfo(this.forced)) want = this.forced;
       else if (context !== null && this.clock >= this.suppressUntil) {
         const cat = sel.category;
@@ -643,7 +676,7 @@ export class StemMusic {
   private updatePreloads(c: StemContext) {
     const ids = this.preloadIds;
     ids.length = 0;
-    if (!this.enabled || !this.manifest) return;
+    if (!this.usable) return;
     const cat = this.selector.category;
     if (cat !== 'combat' && cat !== 'boss' && this.has(SPECIAL_SETS.combat)) ids.push(SPECIAL_SETS.combat);
     if (this.policy === 'full') {
@@ -823,6 +856,7 @@ export class StemMusic {
   force(id: string | null): string {
     if (id !== null && !this.setInfo(id)) return `unknown set "${id}" (have: ${this.manifest ? Object.keys(this.manifest.sets).join(', ') : 'no manifest'})`;
     this.forced = id;
+    if (id && this.codec && this.codec.verdict !== 'ok') return `forcing ${id}, but stems can't play here (Ogg Opus ${this.codec.verdict})`;
     return id ? `forcing ${id}` : 'automatic';
   }
 
@@ -848,7 +882,7 @@ export class StemMusic {
       active = { set: a.set.id, category: a.category, t0: +(a.t0 - now).toFixed(2), layers };
     }
     return {
-      enabled: this.enabled, policy: this.policy, manifest: this.manifestState, sets: this.manifest ? Object.keys(this.manifest.sets) : [],
+      enabled: this.enabled, codec: this.codec?.verdict ?? 'pending', policy: this.policy, manifest: this.manifestState, sets: this.manifest ? Object.keys(this.manifest.sets) : [],
       rate: +this.flavor.rate.toFixed(4), semitones: +this.flavor.semitones.toFixed(2),
       context: this.selector.current, raw: this.selector.raw, target: this.target, forced: this.forced, active,
       fading: this.slots.filter((s) => s.state === 'fading' && s.set).map((s) => s.set!.id),
@@ -862,6 +896,7 @@ export class StemMusic {
     const st = this.status();
     if (!st.enabled) return 'stems off (generative only)';
     if (st.manifest !== 'ready') return `stems: manifest ${st.manifest}`;
+    if (st.codec !== 'ok') return st.codec === 'pending' ? 'stems: checking Ogg Opus decoding…' : `stems unavailable: Ogg Opus ${st.codec} (${this.codec?.error ?? this.codec?.how}) · generative only`;
     const a = st.active;
     const lay = a ? STEM_LAYERS.map((l) => `${l[0]}${a.layers[l].file ? a.layers[l].gain.toFixed(2) : '-'}`).join(' ') : '';
     const mb = st.resident.reduce((s, r) => s + r.mb, 0);

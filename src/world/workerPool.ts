@@ -1,5 +1,6 @@
 /** Priority job pool over chunk workers. */
 import type { ChunkJob, ChunkJobResult } from './chunkJob';
+import { budgets } from '../core/budgets';
 
 interface Pending {
   job: ChunkJob;
@@ -19,7 +20,8 @@ export class ChunkWorkerPool {
   /** Rolling average of job time (ms) for diagnostics. */
   avgMs = 0;
 
-  constructor(seed: number, count = Math.max(2, Math.min(8, (navigator.hardwareConcurrency || 4) - 2))) {
+  /** Default size comes from the device budget (cores, and fewer on memory-tight tablets). */
+  constructor(seed: number, count = budgets.chunkWorkers) {
     this.size = count;
     const readies: Promise<void>[] = [];
     for (let i = 0; i < count; i++) {

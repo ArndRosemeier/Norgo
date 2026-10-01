@@ -4,6 +4,7 @@
  * real multiplayer server without touching game code.
  */
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import { budgets } from '../core/budgets';
 
 export interface Transport {
   send(msg: ClientMessage): void;
@@ -39,7 +40,7 @@ export class WorkerTransport implements Transport {
       else this.dispatch(msg as ServerMessage);
     });
     this.worker.addEventListener('error', (e) => console.error('[server worker]', e.message, e));
-    this.worker.postMessage({ kind: 'init', seed, save });
+    this.worker.postMessage({ kind: 'init', seed, save, deviceClass: budgets.deviceClass });
   }
 
   private dispatch(msg: ServerMessage) {

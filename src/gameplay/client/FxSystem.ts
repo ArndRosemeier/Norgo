@@ -22,6 +22,7 @@ import { BeamPool, DecalKind, DecalPool, FlashLights, MeshFxPool } from './pools
 import { FxLibrary, opts, STYLES, type FxHost, type RGB } from './fxLibrary';
 import { AuraEmitter } from './auras';
 import { WeatherFx } from './weather';
+import { budgets } from '../../core/budgets';
 import { ProjectileView, ZoneView, setFxSkyVis } from './views';
 
 const tmp = new THREE.Vector3();
@@ -169,6 +170,7 @@ export class FxSystem implements ClientModule, EntityViewFactory {
       for (let i = this.gravityDecals.length - 1; i >= 0; i--) if (this.gravityDecals[i].until <= this.time) this.gravityDecals.splice(i, 1);
     }
     this.auras.update(dt, ctx.state.entities, ctx.views, cam, ctx.state.playerId);
+    this.weather.density = (ctx.core.settings.weatherFx ? 1 : 0) * budgets.weatherParticles;
     this.weather.update(dt, cam, ctx.env.weather, time);
     this.lib.update(dt, time, tmp2.copy(cam));
   }

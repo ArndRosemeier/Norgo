@@ -6,6 +6,7 @@
 import { Panel, type UiHost } from '../host';
 import { h, setChildren } from '../dom';
 import { tooltip } from '../widgets';
+import { verbs } from '../gestures';
 import { itemTooltip } from '../tooltips';
 import { applyItemIcon } from '../hud/hud';
 import { RARITY_COLOR, fmtCoins } from '../format';
@@ -84,7 +85,7 @@ export class TradePanel extends Panel {
       h('span', { class: 'n-trade-name', style: { color: RARITY_COLOR[it.rarity] }, text: it.name + (it.count > 1 ? ` ×${it.count}` : '') }),
       h('span', { class: 'n-trade-price', html: `${glyphSvg('coin', 12, '#e9cd6f')} ${fmtCoins(price)}` }),
     );
-    tooltip.bind(el, () => itemTooltip(it, side === 'buy' ? this.host.ctx.state.player?.equipment ?? null : null, { price: { label: side === 'buy' ? 'Click to add to purchase' : 'Click to offer for sale', value: price } }), true);
+    tooltip.bind(el, () => itemTooltip(it, side === 'buy' ? this.host.ctx.state.player?.equipment ?? null : null, { price: { label: side === 'buy' ? `${verbs.click} to add to purchase` : `${verbs.click} to offer for sale`, value: price } }), true);
     return el;
   }
 

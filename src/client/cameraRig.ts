@@ -38,13 +38,51 @@ export class CameraRig {
   zoom(steps: number) {
     this.targetDistance = clamp(this.targetDistance * Math.pow(1.15, steps), this.minDistance, this.maxDistance);
     if (this.targetDistance < 0.7 && steps < 0) this.targetDistance = 0;
-    if (this.targetDistance > 0 && this.targetDistance < 0.7 && steps > 0) this.targetDistance = 1.2;
+    // Zooming out of first person (distance 0 scales to 0) jumps back behind the shoulder.
+    if (this.targetDistance < 0.7 && steps > 0) this.targetDistance = 1.2;
+  }
+
+  /** Distance to return to when leaving first person with the view toggle. */
+  private thirdPersonDistance = 4.2;
+
+  /** First ↔ third person (the camera command). */
+  toggleView() {
+    if (this.targetDistance > 0) {
+      this.thirdPersonDistance = this.targetDistance;
+      this.targetDistance = 0;
+    } else this.targetDistance = Math.max(1.2, this.thirdPersonDistance);
+  }
+
+  /** Free-flying debug camera position (null = follow the player). */
+  free: THREE.Vector3 | null = null;
+
+  /** Detach the camera where it is / reattach it to the player (the freecam command). */
+  toggleFree() {
+    this.free = this.free ? null : this.camera.position.clone();
+  }
+
+  /** Fly the free camera: camera-relative axes in [-1, 1], `up` along world Y. */
+  fly(dt: number, forward: number, right: number, up: number, fast: boolean) {
+    if (!this.free) return;
+    const v = (fast ? 60 : 14) * dt;
+    const cp = Math.cos(this.pitch), sp = Math.sin(this.pitch);
+    this.free.x += (-Math.sin(this.yaw) * cp * forward + Math.cos(this.yaw) * right) * v;
+    this.free.y += (sp * forward + up) * v;
+    this.free.z += (-Math.cos(this.yaw) * cp * forward - Math.sin(this.yaw) * right) * v;
   }
 
   /**
    * @param head world position of the character's head pivot
    */
   update(dt: number, head: THREE.Vector3) {
+    if (this.free) {
+      this.camera.position.copy(this.free);
+      this.camera.quaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
+      this.camera.updateMatrixWorld();
+      this.aimOrigin.copy(this.free);
+      this.aimDir.set(-Math.sin(this.yaw) * Math.cos(this.pitch), Math.sin(this.pitch), -Math.cos(this.yaw) * Math.cos(this.pitch));
+      return;
+    }
     if (!this.initialized) {
       this.smoothTarget.copy(head);
       this.initialized = true;

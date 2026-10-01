@@ -20,6 +20,7 @@ import { EditStore, TerrainEdit } from './edits';
 import { TerrainCollider } from './collider';
 import type { ScatterBatch } from './scatterTypes';
 import { Emitter } from '../core/events';
+import { budgets } from '../core/budgets';
 
 export interface ChunkEntry {
   key: string;
@@ -88,9 +89,10 @@ export class TerrainStreamer {
   timing: ((label: string, ms: number) => void) | null = null;
 
   constructor(readonly gen: WorldGenerator, readonly mat: TerrainMaterialHandle, opts: Partial<StreamerOptions> = {}, edits?: EditStore) {
-    this.opts = { splitFactor: 1.6, rootRadius: 3, maxEntries: 1600, shadowLod: 3, ...opts };
+    this.opts = { splitFactor: 1.6, rootRadius: 3, maxEntries: budgets.chunkCache, shadowLod: 3, ...opts };
     this.edits = edits ?? new EditStore();
     this.collider = new TerrainCollider(gen, this.edits);
+    this.collider.maxGrids = budgets.colliderGrids;
     this.pool = new ChunkWorkerPool(gen.seed);
     this.root.name = 'terrain';
   }

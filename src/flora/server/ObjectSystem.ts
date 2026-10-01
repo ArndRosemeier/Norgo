@@ -18,6 +18,7 @@
  */
 import type { ObjectProvider, ObjectService, ServerContext, ServerSystem } from '../../server/context';
 import type { ServerEntity } from '../../server/entity';
+import { budgets } from '../../core/budgets';
 import type { ClientMessage, ObjectState } from '../../shared/protocol';
 import type { DamageType, EntityId, Vec3 } from '../../shared/types';
 import type { ItemInstance } from '../../items/types';
@@ -56,7 +57,8 @@ interface StateRec {
 
 const STATE_CELL = 128;
 const SYNC_RADIUS = 900;
-const MAX_CHUNKS = 420;
+/** Chunk record cache size: `budgets.objectChunks` (the main thread sends the device class to the server worker). */
+const maxChunks = () => budgets.objectChunks;
 const HARVEST_REACH = 5.5;
 const HARVEST_COOLDOWN = 0.42;
 
@@ -163,7 +165,7 @@ export class ObjectSystem implements ServerSystem, ObjectService {
     }
     this.chunks.set(key, { recs, lastUsed: ++this.useClock });
     this.stats.genMs = this.stats.genMs * 0.9 + (performance.now() - t0) * 0.1;
-    if (this.chunks.size > MAX_CHUNKS) this.evict();
+    if (this.chunks.size > maxChunks()) this.evict();
     this.stats.chunks = this.chunks.size;
     this.stats.objects = this.byId.size;
     return recs;
@@ -171,7 +173,7 @@ export class ObjectSystem implements ServerSystem, ObjectService {
 
   private evict() {
     const arr = [...this.chunks.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
-    const drop = arr.length - Math.floor(MAX_CHUNKS * 0.8);
+    const drop = arr.length - Math.floor(maxChunks() * 0.8);
     for (let i = 0; i < drop; i++) {
       for (const r of arr[i][1].recs) this.byId.delete(r.id);
       this.chunks.delete(arr[i][0]);

@@ -32,6 +32,7 @@ import { MeshBuilder, collapseRange, restoreRange, tintRange, type PieceRange } 
 import { cropMesh } from './crops';
 import { SmokeSystem } from './smoke';
 import { smoothstep } from '../../core/math';
+import { budgets } from '../../core/budgets';
 
 const TILE = 48;
 const NEAR = 110;
@@ -133,7 +134,7 @@ export class SettlementRenderer implements ClientModule {
     this.ctx = ctx;
     if (!this.world) this.world = worldFromGenerator(ctx.gen);
     this.cache = new SettlementCache(this.world);
-    this.cache.max = 40;
+    this.cache.max = budgets.settlementLayouts;
     this.near = createSettlementMaterial();
     this.far = createSettlementFarMaterial();
     this.root.name = 'settlements';

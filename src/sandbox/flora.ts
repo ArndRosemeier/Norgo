@@ -287,7 +287,7 @@ function patch(seed: number, biome: Biome, lod: number) {
   const c0 = gen.cachedColumn(loc[0], loc[1]);
   center.y = uw ? c0.uwFloor + 2 : Math.max(c0.height, 0);
   const ctx = {
-    seed, gen, profile: gen.profile, core: { renderer }, scene, camera,
+    seed, gen, profile: gen.profile, core: { renderer, settings: { vegetation: 1 }, onContextRestored: () => () => undefined }, scene, camera,
     env: { wind, sun },
     streamer: { events: fakeStreamerEvents, opts: { splitFactor: lod === 0 ? 3 : 1.6 }, edits },
     terrain, colliders, debris,

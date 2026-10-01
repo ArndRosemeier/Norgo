@@ -14,6 +14,7 @@
 import type { Vec3 } from '../shared/types';
 import { Synth, renderOffline } from './dsp';
 import { ReverbBus } from './reverb';
+import { platform } from '../core/platform';
 
 export type BusName = 'master' | 'music' | 'sfx' | 'ambience' | 'voice' | 'ui';
 export const BUS_NAMES: BusName[] = ['master', 'music', 'sfx', 'ambience', 'voice', 'ui'];
@@ -190,37 +191,80 @@ export class AudioEngine {
     else this.startHandlers.push(fn);
   }
 
-  /** Listen for the first user gesture to create/resume the context (autoplay policy). */
+  /**
+   * Create/resume the context on user gestures (autoplay policy), iOS/iPadOS included:
+   *  - WebKit only lets a context start or resume *synchronously inside* the handler of a
+   *    user-activation event: touchend, click, pointerup, keydown (not touchstart; pointerdown
+   *    is not reliable there). All of them are listened to and `start()` calls `resume()`
+   *    directly in the handler, with nothing awaited before it.
+   *  - iOS suspends the context in the background and uses the WebKit-only 'interrupted'
+   *    state for phone calls, Siri or other audio apps; getting out of it can need a fresh
+   *    gesture. So the listeners stay installed for the whole session (they return at once
+   *    while the context runs) instead of being removed after the first unlock.
+   */
   installUnlock(): void {
     if (this.unlockInstalled || typeof window === 'undefined') return;
     this.unlockInstalled = true;
-    const evs = ['pointerdown', 'keydown', 'touchend', 'mousedown'];
     const handler = () => {
-      this.start();
-      if (this.ctx && this.ctx.state === 'running') for (const e of evs) window.removeEventListener(e, handler, true);
+      if (!this.ctx || this.ctx.state !== 'running') this.start();
     };
-    for (const e of evs) window.addEventListener(e, handler, true);
+    for (const e of ['pointerdown', 'pointerup', 'touchend', 'click', 'mousedown', 'keydown']) {
+      window.addEventListener(e, handler, { capture: true, passive: true });
+    }
+    const wake = () => {
+      // Without a gesture this may be refused (iOS after an interruption); the gesture listeners retry.
+      if (this.ctx && !document.hidden && this.ctx.state !== 'closed') this.ctx.resume().catch(() => undefined);
+    };
     document.addEventListener('visibilitychange', () => {
       if (!this.ctx) return;
       // Save CPU/battery while hidden; resume when visible again.
-      if (document.hidden) void this.ctx.suspend();
-      else if (!this.muted) void this.ctx.resume();
+      if (document.hidden) this.ctx.suspend().catch(() => undefined);
+      else wake();
+    });
+    // Back/forward cache restore (iOS Safari restores pages from it after app switches).
+    window.addEventListener('pageshow', (e) => {
+      if ((e as PageTransitionEvent).persisted) wake();
     });
   }
 
   /** Create (or resume) the context. Must be called from a user gesture the first time. */
   start(): void {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended' && !document.hidden) void this.ctx.resume();
+      // 'suspended', or WebKit's 'interrupted' (not in the TS type) — anything but running/closed.
+      if (this.ctx.state !== 'running' && this.ctx.state !== 'closed' && !document.hidden) {
+        this.ctx.resume().catch(() => undefined);
+        this.primeOutput(this.ctx);
+      }
       return;
     }
-    const ctx = new AudioContext({ latencyHint: 'interactive' });
+    const Ctor = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return;
+    const ctx = new Ctor({ latencyHint: 'interactive' });
     this.ctx = ctx;
+    ctx.addEventListener('statechange', () => platform.note('audioContext', { state: ctx.state, sampleRate: ctx.sampleRate, baseLatency: ctx.baseLatency }));
     this.buildGraph(ctx);
-    void ctx.resume();
+    ctx.resume().catch(() => undefined);
+    this.primeOutput(ctx);
+    platform.note('audioContext', { state: ctx.state, sampleRate: ctx.sampleRate, baseLatency: ctx.baseLatency });
     const hs = this.startHandlers;
     this.startHandlers = [];
     for (const h of hs) h();
+  }
+
+  /**
+   * Start a one-sample silent buffer inside the gesture. Older iOS releases only unmuted
+   * WebAudio output once a source had started from a user gesture; harmless elsewhere.
+   */
+  private primeOutput(ctx: AudioContext) {
+    try {
+      const src = ctx.createBufferSource();
+      src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+      src.connect(ctx.destination);
+      src.start();
+      src.onended = () => src.disconnect();
+    } catch {
+      /* context closed */
+    }
   }
 
   private buildGraph(ctx: AudioContext) {

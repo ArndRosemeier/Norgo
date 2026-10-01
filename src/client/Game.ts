@@ -24,7 +24,7 @@ import type {
 } from './context';
 import { StaticColliderStore } from './staticColliders';
 import { DebrisSystem } from './debris';
-import { Input } from './input';
+import { Input, HOTBAR_ACTIONS, type VirtualControls } from './input';
 import { PlayerController, MoveInput, Modifiers } from './playerController';
 import { CameraRig } from './cameraRig';
 import { SnapshotBuffer } from './interpolation';
@@ -40,6 +40,8 @@ import { ItemViews } from '../items/client/ItemViews';
 import { FxSystem } from '../gameplay/client/FxSystem';
 import { AudioSystem } from '../audio/AudioSystem';
 import { UI, NewGameChoice } from '../ui/UI';
+import { appShell } from './appShell';
+import { applyGraphicsSettings } from './graphics';
 import type { ItemInstance } from '../items/types';
 
 const SEND_RATE = 20;
@@ -120,6 +122,10 @@ export class Game implements ClientContext {
   }
   get uiCaptured() {
     return this.uiCapturedFlag;
+  }
+  /** On-screen (touch) controls feed the same actions as keyboard and mouse. */
+  get controls(): VirtualControls {
+    return this.input.virtual;
   }
 
   send(msg: ClientMessage) {
@@ -249,6 +255,7 @@ export class Game implements ClientContext {
     this.lastFrame = performance.now();
     this.frame();
     (window as unknown as { norgo: Game }).norgo = this;
+    this.shellOffs.push(appShell.onBackground(() => this.onBackground()), appShell.onForeground(() => this.onForeground()));
   }
 
   private early: ServerMessage[] = [];
@@ -299,6 +306,9 @@ export class Game implements ClientContext {
         this.env.weather = m.weather;
         break;
       case 'correct':
+        // A correction with a non-finite coordinate (e.g. a teleport into unloaded terrain)
+        // would poison the predicted position for good; ignore it.
+        if (!m.pos.every(Number.isFinite)) break;
         this.seated = m.reason === 'sit' || m.reason === 'sleep' ? m.reason : null;
         this.player.correct(m.pos[0], m.pos[1], m.pos[2]);
         if (m.vel) this.player.vel.set(m.vel[0], m.vel[1], m.vel[2]);
@@ -399,8 +409,14 @@ export class Game implements ClientContext {
       requestAnimationFrame(this.frame);
     }
     const now = performance.now();
-    if (this.maxFps > 0 && now - this.lastRendered < 1000 / this.maxFps - 1) return;
-    this.lastRendered = now;
+    if (this.maxFps > 0) {
+      // Frame cap on a fixed cadence with 20 % tolerance: rAF jitter on a display already at the
+      // cap never drops frames, a 120 Hz display capped at 60 renders every other refresh, and
+      // displays that aren't a multiple of the cap still average it.
+      const interval = 1000 / this.maxFps;
+      if (now < this.nextFrameAt - interval * 0.2) return;
+      this.nextFrameAt = now - this.nextFrameAt > interval ? now + interval : this.nextFrameAt + interval;
+    }
     const dt = Math.min(0.1, (now - this.lastFrame) / 1000);
     this.lastFrame = now;
     this.clock += dt;
@@ -413,7 +429,37 @@ export class Game implements ClientContext {
     }
     this.prof.endFrame();
     this.input.endFrame();
+    // Keep the screen on while playing (released in menus and when hidden).
+    appShell.setAwake(!this.uiCapturedFlag);
   };
+
+  // ---------------------------------------------------------------- app lifecycle (tablets: app switching)
+
+  private shellOffs: (() => void)[] = [];
+  private lastBgSave = -1e9;
+
+  /**
+   * Going to the background (tab hidden, iOS app switch, page hide). On iOS the page and its
+   * workers are frozen right after this and may be discarded under memory pressure, so the
+   * world is saved (at most every 30 s), and the pause menu is opened so play doesn't resume
+   * under the player's thumbs on return.
+   */
+  private onBackground() {
+    if (!this.running) return;
+    const now = performance.now();
+    if (now - this.lastBgSave > 30000) {
+      this.lastBgSave = now;
+      this.send({ t: 'save' });
+    }
+    // (Not with ?bgtick: automation keeps playing in hidden tabs on purpose.)
+    if (!this.uiCapturedFlag && this.state.player.hp > 0 && !this.bgTick) this.events.emit('uiOpen', { panel: 'pause' });
+  }
+
+  private onForeground() {
+    // No catch-up burst after the freeze: restart frame timing (dt is clamped too).
+    this.lastFrame = performance.now();
+    this.nextFrameAt = 0;
+  }
 
   private tick(dt: number) {
     const p = this.state.player;
@@ -423,8 +469,10 @@ export class Game implements ClientContext {
 
     // --- camera control
     if (!this.uiCapturedFlag) {
-      this.cam.rotate(this.input.mouseDX, this.input.mouseDY, this.input.sensitivity, this.input.invertY);
+      // Look deltas arrive in radians, sensitivity and invert-Y already applied (mouse or touch).
+      this.cam.rotate(this.input.lookX, this.input.lookY, 1, false);
       if (this.input.wheel) this.cam.zoom(this.input.wheel);
+      if (this.input.wasPressed('camera')) this.cam.toggleView();
     }
 
     // --- player movement
@@ -438,13 +486,18 @@ export class Game implements ClientContext {
       scale: p.appearance?.scale ?? 1,
     };
     const inp = this.input;
+    // Free camera (debug): movement keys fly the camera while the character stands still.
+    if (inp.wasPressed('freecam')) this.cam.toggleFree();
+    const ctl = alive && !this.cam.free;
+    if (this.cam.free) this.cam.fly(dt, inp.moveForward, inp.moveRight, (inp.isDown('jump') ? 1 : 0) - (inp.isDown('crouch') ? 1 : 0), inp.isDown('sprint'));
     const mi: MoveInput = {
-      forward: alive ? (inp.isDown('forward') ? 1 : 0) - (inp.isDown('back') ? 1 : 0) : 0,
-      right: alive ? (inp.isDown('right') ? 1 : 0) - (inp.isDown('left') ? 1 : 0) : 0,
-      jump: alive && inp.isDown('jump'),
-      jumpPressed: alive && inp.wasPressed('jump'),
+      // Analog axes: keys give ±1, the touch stick anything between (a half push walks).
+      forward: ctl ? inp.moveForward : 0,
+      right: ctl ? inp.moveRight : 0,
+      jump: ctl && inp.isDown('jump'),
+      jumpPressed: ctl && inp.wasPressed('jump'),
       sprint: inp.isDown('sprint'),
-      crouch: inp.isDown('crouch'),
+      crouch: !this.cam.free && inp.isDown('crouch'),
       walk: inp.isDown('walk'),
       camYaw: this.cam.yaw,
       camPitch: this.cam.pitch,
@@ -721,7 +774,8 @@ export class Game implements ClientContext {
     const dir: Vec3 = [this.cam.aimDir.x, this.cam.aimDir.y, this.cam.aimDir.z];
 
     // Tab targeting: the key cycles forward, with Shift backward (Esc clears via the UI).
-    if (inp.wasPressed('target')) this.targeting.cycleTargets(inp.wasPressedShift('target') ? -1 : 1);
+    if (inp.wasPressed('target')) this.targeting.cycleTargets(1);
+    if (inp.wasPressed('targetPrev')) this.targeting.cycleTargets(-1);
     const lock = this.targeting.lockId;
 
     if (inp.wasPressed('interact') && f) {
@@ -771,11 +825,11 @@ export class Game implements ClientContext {
     }
 
     // Hotbar: press/release (charged abilities fire on release, channels end on release).
-    const hot = ['hot1', 'hot2', 'hot3', 'hot4', 'hot5', 'hot6', 'hot7', 'hot8', 'hot9', 'hot0'] as const;
+    const hot = HOTBAR_ACTIONS;
     const aimInfo = (): AimInfo => {
       const sy = Math.sin(this.cam.yaw), cy = Math.cos(this.cam.yaw);
-      const fwd = (inp.isDown('forward') ? 1 : 0) - (inp.isDown('back') ? 1 : 0);
-      const rgt = (inp.isDown('right') ? 1 : 0) - (inp.isDown('left') ? 1 : 0);
+      const fwd = inp.moveForward;
+      const rgt = inp.moveRight;
       const mx = -sy * fwd + cy * rgt, mz = -cy * fwd - sy * rgt;
       const ml = Math.hypot(mx, mz);
       return {
@@ -831,7 +885,8 @@ export class Game implements ClientContext {
   // ---------------------------------------------------------------- settings & teardown
 
   private maxFps = 0;
-  private lastRendered = 0;
+  /** Frame cap: earliest time of the next rendered frame (cadence, see frame()). */
+  private nextFrameAt = 0;
 
   /** Bridge the UI's settings store into renderer, streamer, camera, input and audio. */
   private hookSettings() {
@@ -841,27 +896,10 @@ export class Game implements ClientContext {
     };
     ui.onSettingsChange?.((st) => {
       const g = st.graphics;
-      const vd = g.viewDistance;
-      this.streamer.opts.splitFactor = clamp((vd / 1800) * 1.6, 1.15, 2.2);
-      this.streamer.opts.rootRadius = vd < 900 ? 1 : vd < 2200 ? 2 : 3;
-      this.streamer.opts.shadowLod = g.shadows === 'high' ? 3 : 2;
-      // Shorter view distances hide the streaming edge with denser fog.
-      this.env.fogScale = clamp(1800 / vd, 0.7, 2.5);
-      const base = Math.min(window.devicePixelRatio || 1, 1.5);
-      const next = { pixelRatio: base * g.renderScale, bloom: g.bloom, antialias: g.antialias, shadows: g.shadows !== 'off', viewDistance: this.streamer.opts.splitFactor };
-      const cur = this.core.settings;
-      if (cur.pixelRatio !== next.pixelRatio || cur.bloom !== next.bloom || cur.antialias !== next.antialias || cur.shadows !== next.shadows) this.core.updateSettings(next, this.container);
-      const ms = g.shadows === 'high' ? 2048 : 1024;
-      if (this.env.sun.shadow.mapSize.x !== ms) {
-        this.env.sun.shadow.mapSize.set(ms, ms);
-        this.env.sun.shadow.map?.dispose();
-        (this.env.sun.shadow as { map: unknown }).map = null;
-      }
+      applyGraphicsSettings(g, { core: this.core, streamer: this.streamer, env: this.env, container: this.container });
       this.cam.fov = g.fov;
       this.maxFps = g.maxFps;
-      this.input.sensitivity = 0.0022 * st.controls.mouseSensitivity;
-      this.input.invertY = st.controls.invertY;
-      this.input.setBinding('target', st.controls.targetKey);
+      this.input.applyControls(st.controls, st.touch.lookSensitivity);
       const a = st.audio;
       (this.audio as unknown as { setVolumes?(v: Record<string, number>): void }).setVolumes?.({ master: a.master, music: a.music, sfx: a.effects, ambience: a.ambience, voice: a.voice, ui: a.ui });
       (this.audio as unknown as { setMusicStyle?(s: string): void }).setMusicStyle?.(a.musicStyle);
@@ -886,13 +924,14 @@ export class Game implements ClientContext {
   setMouseSensitivity(v: number) {
     this.input.sensitivity = v;
   }
-
   setFov(v: number) {
     this.cam.fov = v;
   }
 
   dispose() {
     this.running = false;
+    for (const off of this.shellOffs.splice(0)) off();
+    appShell.setAwake(false);
     for (const m of this.modules) m.dispose?.();
     this.targeting.dispose();
     this.transport.close();

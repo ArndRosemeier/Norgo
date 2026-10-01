@@ -5,14 +5,17 @@
  */
 import { GameServer, TICK_RATE, SaveFile } from './GameServer';
 import type { ClientMessage, ServerMessage } from '../shared/protocol';
+import { applyDeviceClass, type DeviceClass } from '../core/budgets';
 
 let server: GameServer | null = null;
 let handler: ((msg: ClientMessage) => void) | null = null;
 const post = (msg: ServerMessage) => (self as unknown as Worker).postMessage(msg);
 
 self.onmessage = (ev: MessageEvent) => {
-  const data = ev.data as { kind: 'init'; seed: number; save?: string } | { kind: 'msg'; msg: ClientMessage };
+  const data = ev.data as { kind: 'init'; seed: number; save?: string; deviceClass?: DeviceClass } | { kind: 'msg'; msg: ClientMessage };
   if (data.kind === 'init') {
+    // Workers can't see the device; the client tells us which cache budgets apply.
+    if (data.deviceClass) applyDeviceClass(data.deviceClass);
     server = new GameServer(data.seed);
     if (data.save) {
       try {

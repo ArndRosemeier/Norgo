@@ -7,6 +7,7 @@ import { h } from '../dom';
 import { glyphSvg, abilityIcon, skillIcon } from '../icons';
 import { abilityOrStub, skillDef, skillOrStub, xpForLevel } from '../data';
 import type { GmMessage } from '../../gm/types';
+import { keyHint } from '../controls';
 
 type Tone = 'info' | 'good' | 'bad' | 'warn';
 
@@ -135,7 +136,7 @@ export class XpFeed {
 
   unlock(ability: string, banners: Banners) {
     const def = abilityOrStub(ability);
-    banners.show('unlock', def.name, `${skillOrStub(def.skill).name} · drag it from the skill book (K) onto your hotbar`, abilityIcon(def, skillDef(def.skill)));
+    banners.show('unlock', def.name, `${skillOrStub(def.skill).name} · drag it from the skill book${keyHint('skills')} onto your hotbar`, abilityIcon(def, skillDef(def.skill)));
   }
 }
 

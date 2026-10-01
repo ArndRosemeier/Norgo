@@ -1,8 +1,9 @@
 /**
- * Full-screen world map: pan (drag / WASD / arrows), zoom (wheel / +−) around the
- * cursor, progressive worker-rendered terrain tiles with coarse fallbacks,
- * roads, settlements, discovered POIs, quest objectives, GM locations, player
- * marker and a placeable waypoint (double-click / right-click).
+ * Full-screen world map: pan (drag / the movement keys), zoom (wheel / +− / pinch)
+ * around the cursor or fingers, progressive worker-rendered terrain tiles with coarse
+ * fallbacks, roads, settlements, discovered POIs, quest objectives, GM locations, player
+ * marker and a placeable waypoint (double-click / right-click; long-press on touch).
+ * On touch a tap shows what is under the finger (the mouse shows it on hover).
  */
 import { Panel, type UiHost } from '../host';
 import { h } from '../dom';
@@ -16,6 +17,12 @@ import { BIOMES } from '../../world/biomes';
 import type { PoiKind } from '../../world/sites';
 import type { RaceId } from '../../humanoid/types';
 import { glyphSvg } from '../icons';
+import { onDouble, onSecondary, touchMode, verbs } from '../gestures';
+import { keysOf, type GameAction } from '../../client/commands';
+import { keyCaps } from '../controls';
+
+/** Panning follows the movement bindings: action → [dx, dz]. */
+const PAN: [GameAction, number, number][] = [['forward', 0, -1], ['left', -1, 0], ['back', 0, 1], ['right', 1, 0]];
 
 interface Hit {
   x: number;
@@ -43,6 +50,7 @@ export class WorldMapPanel extends Panel {
   private offTile: () => void;
   private dpr = Math.min(2, window.devicePixelRatio || 1);
   private hoverHit: Hit | null = null;
+  private help: HTMLElement;
 
   constructor(host: UiHost, private renderer: MapRenderer) {
     super(host, 'World Map', 'n-map-panel', '');
@@ -70,11 +78,7 @@ export class WorldMapPanel extends Panel {
         h('button', { class: 'n-btn small', html: `${glyphSvg('arrow', 13)} Center on me`, onclick: () => this.centerOnPlayer() }),
         h('button', { class: 'n-btn small ghost', text: 'Clear waypoint', onclick: () => host.setWaypoint(null) }),
       ),
-      h('div', { class: 'n-map-help n-faint' },
-        h('div', null, 'Drag or ', h('span', { class: 'n-key', text: 'WASD' }), ' to pan · wheel to zoom'),
-        h('div', null, 'Double-click to set a waypoint'),
-        h('div', null, h('span', { class: 'n-key', text: 'M' }), ' / ', h('span', { class: 'n-key', text: 'Esc' }), ' to close'),
-      ),
+      this.help = h('div', { class: 'n-map-help n-faint' }),
     );
     this.body.classList.add('n-map-body');
     this.body.append(h('div', { class: 'n-map-stage' }, this.canvas, h('div', { class: 'n-map-vignette' }), this.coords, this.progress), side);
@@ -82,19 +86,62 @@ export class WorldMapPanel extends Panel {
     this.bindInput();
   }
 
+  /** Help lines for the current input mode and key bindings. */
+  private renderHelp() {
+    const touch = touchMode();
+    const pan = PAN.map(([a]) => keysOf(a)[0]).filter(Boolean).map((k) => k.replace(/^Key/, '')).join('');
+    this.help.replaceChildren(
+      touch
+        ? h('div', null, 'Drag to pan · pinch to zoom · tap a marker for details')
+        : h('div', null, 'Drag or ', h('span', { class: 'n-key', text: pan }), ' to pan · wheel to zoom'),
+      h('div', null, `${verbs.double} or ${touch ? 'hold' : 'right-click'} to set a waypoint`),
+      touch ? h('div', null, '✕ to close') : h('div', null, ...keyCaps('map', 'n-key'), ' / ', ...keyCaps('pause', 'n-key'), ' to close'),
+    );
+  }
+
   private bindInput() {
     const c = this.canvas;
-    let drag: { x: number; y: number; cx: number; cz: number; moved: boolean } | null = null;
+    // Pointers on the map by id: one drags, two pinch-zoom around their midpoint.
+    const pts = new Map<number, { x: number; y: number }>();
+    let drag: { x: number; y: number; cx: number; cz: number } | null = null;
+    let pinch: { dist: number } | null = null;
+    const local = (x: number, y: number) => {
+      const r = c.getBoundingClientRect();
+      return [x - r.left, y - r.top] as const;
+    };
     c.addEventListener('pointerdown', (e) => {
       if (e.button !== 0) return;
       c.setPointerCapture(e.pointerId);
-      drag = { x: e.clientX, y: e.clientY, cx: this.cx, cz: this.cz, moved: false };
+      pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (pts.size === 2) {
+        const [a, b] = [...pts.values()];
+        pinch = { dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)) };
+        drag = null;
+      } else if (pts.size === 1) {
+        drag = { x: e.clientX, y: e.clientY, cx: this.cx, cz: this.cz };
+        // A tap shows what is under the finger (a mouse shows it on hover).
+        if (e.pointerType !== 'mouse') this.hover(e);
+      }
       c.focus();
     });
     c.addEventListener('pointermove', (e) => {
-      if (drag) {
+      const p = pts.get(e.pointerId);
+      if (p) {
+        p.x = e.clientX;
+        p.y = e.clientY;
+      }
+      if (pinch && pts.size >= 2) {
+        const [a, b] = [...pts.values()];
+        const d = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+        const [mx, my] = local((a.x + b.x) / 2, (a.y + b.y) / 2);
+        this.zoomAt(pinch.dist / d, mx, my);
+        pinch.dist = d;
+        tooltip.hide(c);
+        return;
+      }
+      if (drag && p) {
         const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
-        if (Math.abs(dx) + Math.abs(dy) > 3) drag.moved = true;
+        if (Math.abs(dx) + Math.abs(dy) <= 3) return;
         this.cx = drag.cx - dx * this.mpp;
         this.cz = drag.cz - dy * this.mpp;
         this.follow = false;
@@ -102,19 +149,34 @@ export class WorldMapPanel extends Panel {
         tooltip.hide(c);
         return;
       }
-      this.hover(e);
+      if (e.pointerType === 'mouse') this.hover(e);
     });
-    c.addEventListener('pointerup', () => (drag = null));
-    c.addEventListener('pointerleave', () => tooltip.hide(c));
+    const up = (e: PointerEvent) => {
+      pts.delete(e.pointerId);
+      if (pts.size < 2) pinch = null;
+      if (pts.size === 1) {
+        // Continue dragging with the remaining finger from where it is now.
+        const [rest] = [...pts.values()];
+        drag = { x: rest.x, y: rest.y, cx: this.cx, cz: this.cz };
+      } else if (!pts.size) drag = null;
+    };
+    c.addEventListener('pointerup', up);
+    c.addEventListener('pointercancel', up);
+    c.addEventListener('pointerleave', (e) => {
+      if (e.pointerType === 'mouse') tooltip.hide(c);
+    });
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
       this.zoomAt(e.deltaY > 0 ? 1.25 : 0.8, e.offsetX, e.offsetY);
     }, { passive: false });
-    c.addEventListener('dblclick', (e) => this.placeWaypoint(e));
-    c.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-      this.placeWaypoint(e);
-    });
+    const waypointAt = (x: number, y: number) => {
+      const [lx, ly] = local(x, y);
+      this.placeWaypoint(lx, ly);
+    };
+    let last = { x: 0, y: 0 };
+    c.addEventListener('pointerdown', (e) => (last = { x: e.clientX, y: e.clientY }), true);
+    onDouble(c, () => waypointAt(last.x, last.y));
+    onSecondary(c, (x, y) => waypointAt(x, y));
   }
 
   private screenToWorld(sx: number, sy: number): [number, number] {
@@ -122,8 +184,8 @@ export class WorldMapPanel extends Panel {
     return [this.cx + (sx - w / 2) * this.mpp, this.cz + (sy - hgt / 2) * this.mpp];
   }
 
-  private placeWaypoint(e: MouseEvent) {
-    const [x, z] = this.screenToWorld(e.offsetX, e.offsetY);
+  private placeWaypoint(sx: number, sy: number) {
+    const [x, z] = this.screenToWorld(sx, sy);
     this.host.setWaypoint([x, this.host.ctx.gen.heightAt(x, z), z]);
     this.host.sound('ui.waypoint');
     this.dirty = true;
@@ -160,22 +222,28 @@ export class WorldMapPanel extends Panel {
 
   private hover(e: PointerEvent) {
     let best: Hit | null = null, bd = Infinity;
+    // Fingers are less precise than a cursor: bigger catch radius on touch.
+    const slack = e.pointerType === 'mouse' ? 0 : 10;
     for (const hh of this.hits) {
       const d = Math.hypot(hh.x - e.offsetX, hh.y - e.offsetY);
-      if (d < hh.r && d < bd) { best = hh; bd = d; }
+      if (d < hh.r + slack && d < bd) { best = hh; bd = d; }
     }
     const [wx, wz] = this.screenToWorld(e.offsetX, e.offsetY);
     const b = BIOMES[this.host.ctx.gen.biomeAt(wx, wz)];
     const pp = this.host.ctx.playerPos();
     this.coords.textContent = `${Math.round(wx)}, ${Math.round(wz)} · ${b?.name ?? ''} · ${fmtDist(Math.hypot(wx - pp[0], wz - pp[2]))} away`;
-    if (best !== this.hoverHit) {
+    if (best !== this.hoverHit || e.pointerType !== 'mouse') {
       this.hoverHit = best;
-      if (best) tooltip.show(this.canvas, [h('div', { class: 'n-tip-title n-gold', text: best.title }), h('div', { class: 'n-tip-sub', style: 'text-transform:none;letter-spacing:0', text: best.sub })]);
-      else tooltip.hide(this.canvas);
+      const tip = best && [h('div', { class: 'n-tip-title n-gold', text: best.title }), h('div', { class: 'n-tip-sub', style: 'text-transform:none;letter-spacing:0', text: best.sub })];
+      if (!tip) tooltip.hide(this.canvas);
+      else if (e.pointerType === 'mouse') tooltip.show(this.canvas, tip);
+      // Touch: pin the card at the finger until the next tap.
+      else tooltip.showAt(this.canvas, tip, e.clientX, e.clientY);
     }
   }
 
   protected override onOpen(data?: unknown) {
+    this.renderHelp();
     const d = data as { x?: number; z?: number } | undefined;
     if (d && typeof d.x === 'number' && typeof d.z === 'number') this.focusOn(d.x, d.z);
     else this.centerOnPlayer();
@@ -190,7 +258,7 @@ export class WorldMapPanel extends Panel {
 
   override onKey(e: KeyboardEvent): boolean {
     const k = e.code;
-    if (['KeyW', 'KeyA', 'KeyS', 'KeyD', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(k)) {
+    if (PAN.some(([a]) => keysOf(a).includes(k))) {
       if (e.type === 'keydown') this.keys.add(k);
       else this.keys.delete(k);
       return true;
@@ -222,11 +290,11 @@ export class WorldMapPanel extends Panel {
   override update(dt: number) {
     let pan = 0;
     const sp = 600 * dt;
-    for (const k of this.keys) {
-      if (k === 'KeyW' || k === 'ArrowUp') { this.cz -= sp * this.mpp; pan++; }
-      if (k === 'KeyS' || k === 'ArrowDown') { this.cz += sp * this.mpp; pan++; }
-      if (k === 'KeyA' || k === 'ArrowLeft') { this.cx -= sp * this.mpp; pan++; }
-      if (k === 'KeyD' || k === 'ArrowRight') { this.cx += sp * this.mpp; pan++; }
+    for (const [a, dx, dz] of PAN) {
+      if (!keysOf(a).some((k) => this.keys.has(k))) continue;
+      this.cx += dx * sp * this.mpp;
+      this.cz += dz * sp * this.mpp;
+      pan++;
     }
     if (pan) { this.follow = false; this.dirty = true; }
     if (this.follow) {
@@ -332,7 +400,7 @@ export class WorldMapPanel extends Panel {
     if (wp) {
       const x = sx(wp[0]), y = sy(wp[2]);
       drawWaypoint(g, x, y, 1.3);
-      this.hits.push({ x, y: y - 9, r: 12, title: 'Waypoint', sub: `${fmtDist(Math.hypot(wp[0] - ctx.playerPos()[0], wp[2] - ctx.playerPos()[2]))} away — right-click elsewhere to move` });
+      this.hits.push({ x, y: y - 9, r: 12, title: 'Waypoint', sub: `${fmtDist(Math.hypot(wp[0] - ctx.playerPos()[0], wp[2] - ctx.playerPos()[2]))} away — ${verbs.secondary} elsewhere to move` });
     }
     const pp = ctx.playerPos();
     drawPlayer(g, sx(pp[0]), sy(pp[2]), cameraHeading(ctx.camera), 1.25);

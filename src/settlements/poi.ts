@@ -5,6 +5,7 @@
 import type { PoiInfo } from '../world/sites';
 import type { BuildingRole, PoiLayout, SmartSpot } from './types';
 import { deriveSeed } from '../core/rng';
+import { budgets } from '../core/budgets';
 import type { LayoutTerrain } from './layout';
 import { Kit, type Blueprint } from './build/kit';
 import { buildPoiStructure, poiDescription, poiSpots } from './build/poiBuild';
@@ -46,6 +47,6 @@ export function poiBlueprint(l: PoiLayout): Blueprint {
   buildPoiStructure(k, l);
   const bp = k.finish(null);
   cache.set(l.poiId, bp);
-  if (cache.size > 300) cache.delete(cache.keys().next().value as string);
+  while (cache.size > budgets.poiCache) cache.delete(cache.keys().next().value as string);
   return bp;
 }

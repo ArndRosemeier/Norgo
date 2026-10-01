@@ -17,7 +17,13 @@
 import './styles/base.css';
 import './styles/hud.css';
 import './styles/panels.css';
+import './styles/touch.css';
 import type { ClientContext, ClientModule, TargetInfo } from '../client/context';
+import { bindingOfEvent, hotbarSlot, type CommandId, type UiCommand } from '../client/commands';
+import { platform } from '../core/platform';
+import { currentKeyMap, keyHint } from './controls';
+import { TouchControls } from './hud/touch';
+import './gestures';
 import type { HumanoidAppearance } from '../humanoid/types';
 import type { GameEvent, PlayerState, ServerMessage } from '../shared/protocol';
 import type { GmMessage, QuestView } from '../gm/types';
@@ -63,8 +69,6 @@ export interface NewGameChoice {
 export type { GameSettings, GraphicsSettings } from './settings';
 export { loadSettings, settingsStore } from './settings';
 
-// Tab used to be a second inventory key; it now cycles tab targets (client core, rebindable).
-const TOGGLE_KEYS: Record<string, PanelId> = { KeyI: 'inventory', KeyK: 'skills', KeyJ: 'journal', KeyM: 'map', KeyG: 'gm' };
 const STATION_RE = /craft|forge|anvil|smith|workbench|bench|alchemy|loom|cook|kitchen|tannery|kiln|cauldron|furnace|altar/i;
 
 /** Map an interaction label onto the items module's station ids. */
@@ -120,6 +124,10 @@ export class UI implements ClientModule, UiHost {
   private escHints = 0;
   private debug!: DebugOverlay;
   private hudEl!: HTMLElement;
+  private touch!: TouchControls;
+  /** Key bindings from the command registry (rebuilt when the settings change). */
+  private uiKeys = new Map<string, CommandId[]>();
+  private gameKeys = new Map<string, CommandId[]>();
 
   private dialog!: DialogPanel;
   private trade!: TradePanel;
@@ -296,8 +304,11 @@ export class UI implements ClientModule, UiHost {
     this.guide = new WelcomeGuide(ctx);
     this.targetFrame = new TargetFrame(this);
     this.debug = new DebugOverlay(() => [`ui map tiles pending ${this.renderer.pending}`, `ui panel ${this.active?.id ?? '-'}`]);
+    this.touch = new TouchControls(this);
 
     this.hudEl = h('div', { class: 'n-hud' },
+      // First child: the touch layer sits under every other HUD element.
+      this.touch.el,
       this.plates.el,
       this.floaters.el,
       this.vitals.hurtOverlay,
@@ -363,11 +374,21 @@ export class UI implements ClientModule, UiHost {
         this.trade.setTrade(m);
         if (!this.isPanelOpen('trade')) this.open('trade');
       }),
-      ev.on('focus', (f) => this.crosshair.setFocus(f)),
+      ev.on('focus', (f) => {
+        this.crosshair.setFocus(f);
+        this.touch.setFocus(f);
+      }),
       ev.on('target', (t) => {
         this.target = t;
         this.targetFrame.set(t);
+        this.touch.setTarget(t);
         this.plates.targetId = t?.id ?? null;
+      }),
+      // Help texts and key hints follow the input mode (keys ↔ touch gestures).
+      platform.onInputMode(() => {
+        this.guide.render();
+        this.crosshair.setFocus(this.crosshair.current);
+        this.targetFrame.refreshHint();
       }),
       ev.on('notify', (n) => this.notify(n.text, n.tone)),
       ev.on('uiOpen', ({ panel, data }) => this.onUiOpen(panel, data)),
@@ -405,23 +426,24 @@ export class UI implements ClientModule, UiHost {
     });
   }
 
+  /** Keyboard → interface commands, all bindings from the command registry. */
   private onKey(e: KeyboardEvent) {
     if (!this.initialized) return;
     if (document.querySelector('.n-modal-back')) return;
     const down = e.type === 'keydown';
-    if (e.key === 'Escape') {
+    const cmds = this.uiKeys.get(e.code) ?? [];
+    if (cmds.includes('pause')) {
       if (!down) return;
       if (closeContextMenu()) return;
       // With a tab target, the first Esc clears it; the next one pauses as usual.
-      if (!this.active && this.target && !this.death.shown && !e.repeat) {
+      if (cmds.includes('targetClear') && !this.active && this.target && !this.death.shown && !e.repeat) {
         this.clearTargetByEsc();
         e.preventDefault();
         return;
       }
       // A held Esc that just cleared the target must not go on to open the pause menu.
       if (e.repeat && performance.now() - this.escClearedAt < 1500) return;
-      if (this.active) this.close();
-      else if (!this.death.shown) this.open('pause');
+      this.runCommand('pause');
       e.preventDefault();
       return;
     }
@@ -431,27 +453,42 @@ export class UI implements ClientModule, UiHost {
       return;
     }
     if (!down) return;
-    if (e.code === 'F3') {
+    if (cmds.includes('debug')) {
       this.debug.toggle();
       e.preventDefault();
       return;
     }
     if (e.repeat) return;
-    if (e.code === 'KeyH' && !this.death.shown) {
-      this.guide.toggle();
+    const cmd = cmds[0] as UiCommand | undefined;
+    if (cmd) {
+      this.runCommand(cmd);
       return;
     }
-    const target = TOGGLE_KEYS[e.code];
-    if (target && !this.death.shown) {
-      if (e.code === 'Tab') e.preventDefault();
-      // Gameplay keys should not toggle from inside text-heavy panels.
-      if (this.active?.id === 'dialog' && target !== 'inventory') return;
-      this.toggle(target);
-      return;
-    }
-    if (!this.active && /^Digit\d$/.test(e.code)) {
-      const n = Number(e.code.slice(5));
-      this.hotbar.flash(n === 0 ? 9 : n - 1);
+    const slot = hotbarSlot(this.gameKeys.get(bindingOfEvent(e, this.gameKeys))?.[0] ?? 'look');
+    if (!this.active && slot >= 0) this.hotbar.flash(slot);
+  }
+
+  /** Run an interface command (keyboard, touch menu bar, touch gestures). */
+  runCommand(id: UiCommand): void {
+    switch (id) {
+      case 'targetClear':
+        this.ctx.events.emit('targetRequest', { op: 'clear' });
+        return;
+      case 'pause':
+        if (this.active) this.close();
+        else if (!this.death.shown) this.open('pause');
+        return;
+      case 'debug':
+        this.debug.toggle();
+        return;
+      case 'guide':
+        if (!this.death.shown) this.guide.toggle();
+        return;
+      default:
+        if (this.death.shown) return;
+        // Gameplay keys should not toggle from inside text-heavy panels.
+        if (this.active?.id === 'dialog' && id !== 'inventory') return;
+        this.toggle(id);
     }
   }
 
@@ -527,7 +564,7 @@ export class UI implements ClientModule, UiHost {
       if (prev === q.status) continue;
       this.knownQuests.set(q.id, q.status);
       if (!prev && (q.status === 'active' || q.status === 'offered')) {
-        this.banners.show('quest', q.title, q.status === 'offered' ? 'A new quest is offered — see your journal (J)' : 'New quest');
+        this.banners.show('quest', q.title, q.status === 'offered' ? `A new quest is offered — see your journal${keyHint('journal')}` : 'New quest');
         this.sound('ui.quest');
         if (q.status === 'active' && !this.trackedQuest) this.setTrackedQuest(q.id);
       } else if (q.status === 'active' && prev === 'offered') {
@@ -675,6 +712,12 @@ export class UI implements ClientModule, UiHost {
 
   private applySettings(s: GameSettings) {
     applyInterfaceScale(this.root, s.interface);
+    this.uiKeys = currentKeyMap('ui');
+    this.gameKeys = currentKeyMap('game');
+    this.touch.applySettings(s.touch);
+    this.hotbar.refreshKeys();
+    this.guide.render();
+    this.targetFrame.refreshHint();
     this.minimap.el.classList.toggle('n-hidden', !s.interface.minimap);
     this.compass.el.classList.toggle('n-hidden', !s.interface.compass);
     this.floaters.enabled = s.interface.damageNumbers;
@@ -723,6 +766,9 @@ export class UI implements ClientModule, UiHost {
     }
     // HUD fades while full-screen panels are open.
     this.hudEl.classList.toggle('dimmed', !!this.active && this.active.id !== 'dialog');
+    // Touch controls: touch mode only, and never over panels, dialogs or the death screen.
+    this.touch.setVisible(platform.inputMode === 'touch' && !this.active && !this.death.shown);
+    this.touch.update();
   }
 
   private checkArea() {

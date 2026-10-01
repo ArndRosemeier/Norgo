@@ -65,6 +65,13 @@ const G: Record<string, string> = {
   hourglass: 'S:<path d="M6 2.5h12M6 21.5h12M7.5 2.5c0 5 9 5 9 9.5s-9 4.5-9 9.5M16.5 2.5c0 5-9 5-9 9.5s9 4.5 9 9.5"/>',
   music: '<path d="M9 17.5V5l11-2.5V15" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="6.5" cy="17.5" r="3"/><circle cx="17.5" cy="15" r="3"/>',
   web: 'S:<path d="M12 2v20M2 12h20M4.9 4.9l14.2 14.2M19.1 4.9 4.9 19.1M12 7l3.5 1.5L17 12l-1.5 3.5L12 17l-3.5-1.5L7 12l1.5-3.5z"/>',
+  // Control glyphs (command registry: touch buttons, menu bar, help texts).
+  up: 'S:<path d="M12 20.5V4.5M5 11.5l7-7 7 7"/>',
+  down: 'S:<path d="M12 3.5v16M5 12.5l7 7 7-7"/>',
+  reticle: 'S:<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="1.2"/><path d="M12 1.5v5M12 17.5v5M1.5 12h5M17.5 12h5"/>',
+  cam: 'S:<circle cx="12" cy="7.5" r="3.5"/><path d="M4.5 21c.7-4.6 3.6-7.2 7.5-7.2s6.8 2.6 7.5 7.2"/>',
+  bag: '<path fill-rule="evenodd" d="M8 7.5V6.5a4 4 0 0 1 8 0v1h3.6l-1.1 14H5.5l-1.1-14zm2 0h4v-1a2 2 0 0 0-4 0z"/>',
+  menu: 'S:<path d="M4 6.5h16M4 12h16M4 17.5h16"/>',
 };
 
 export const GLYPHS = Object.keys(G);

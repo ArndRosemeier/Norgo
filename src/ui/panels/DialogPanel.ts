@@ -8,6 +8,7 @@ import { h, setChildren } from '../dom';
 import type { DialogView, DialogChoice, DialogLine } from '../../dialog/types';
 import { skillOrStub } from '../data';
 import { glyphSvg } from '../icons';
+import { autoFocusField } from '../gestures';
 
 const MOOD_GLYPH: Record<string, string> = {
   happy: 'sun', angry: 'flame', sad: 'drop', afraid: 'eye', surprised: 'sparkle', disgusted: 'skull', focused: 'rune', pain: 'burst', neutral: '',
@@ -160,7 +161,7 @@ export class DialogPanel extends Panel {
   }
 
   protected override onOpen() {
-    if (this.view?.freeText) setTimeout(() => this.input.focus(), 50);
+    if (this.view?.freeText) autoFocusField(this.input, 50);
   }
 
   /** Hide for the trade window without ending the conversation. */

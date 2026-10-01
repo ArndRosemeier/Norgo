@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import type { WorldGenerator } from '../world/generator';
 import { SEA_LEVEL, UNDERWORLD_SEA_LEVEL } from '../world/constants';
 import { Column } from '../world/generator';
+import { platform } from '../core/platform';
 
 const HM_RES = 128;
 const HM_SPAN = 2048; // meters covered by the height map
@@ -19,6 +20,13 @@ export class Water {
   private hmData = new Float32Array(HM_RES * HM_RES);
   private hmBack = new Float32Array(HM_RES * HM_RES);
   private hmTex: THREE.DataTexture;
+  /**
+   * Half-float upload copy when 32-bit float textures can't be filtered linearly
+   * (OES_texture_float_linear is optional; without it an R32F texture with LINEAR filtering is
+   * incomplete and samples as 0). R16F filters in core WebGL2; heights near sea level — where
+   * the shoreline needs them — keep ~cm precision.
+   */
+  private hmHalf: Uint16Array | null = null;
   private hmCenter = new THREE.Vector2(1e9, 1e9);
   private pendingCenter: THREE.Vector2 | null = null;
   private pendingRow = 0;
@@ -27,7 +35,11 @@ export class Water {
   constructor(private gen: WorldGenerator) {
     const p = gen.profile;
     const c = (rgb: [number, number, number]) => new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2], THREE.SRGBColorSpace);
-    this.hmTex = new THREE.DataTexture(this.hmData, HM_RES, HM_RES, THREE.RedFormat, THREE.FloatType);
+    if (platform.probeGL().floatLinear) this.hmTex = new THREE.DataTexture(this.hmData, HM_RES, HM_RES, THREE.RedFormat, THREE.FloatType);
+    else {
+      this.hmHalf = new Uint16Array(HM_RES * HM_RES);
+      this.hmTex = new THREE.DataTexture(this.hmHalf, HM_RES, HM_RES, THREE.RedFormat, THREE.HalfFloatType);
+    }
     this.hmTex.magFilter = THREE.LinearFilter;
     this.hmTex.minFilter = THREE.LinearFilter;
     this.hmTex.wrapS = this.hmTex.wrapT = THREE.ClampToEdgeWrapping;
@@ -168,6 +180,7 @@ export class Water {
       }
       if (this.pendingRow >= HM_RES) {
         this.hmData.set(this.hmBack);
+        if (this.hmHalf) for (let i = 0; i < this.hmData.length; i++) this.hmHalf[i] = THREE.DataUtils.toHalfFloat(this.hmData[i]);
         this.hmTex.needsUpdate = true;
         this.hmCenter.copy(pc);
         (this.uniforms.uHmOrigin.value as THREE.Vector2).copy(pc);

@@ -6,6 +6,9 @@
 import { Panel, type UiHost } from '../host';
 import { h, setChildren } from '../dom';
 import { tooltip, drag, tabs } from '../widgets';
+import { onDouble, touchMode } from '../gestures';
+import { HOTBAR_ACTIONS, primaryKey } from '../../client/commands';
+import { currentOverrides } from '../controls';
 import { abilityCard } from '../tooltips';
 import { SKILL_CATEGORIES, skillOrStub, abilityOrStub, xpForLevel } from '../data';
 import { SKILLS } from '../../gameplay/data/catalog';
@@ -165,22 +168,26 @@ export class SkillsPanel extends Panel {
     const el = h('div', { class: `n-ab-card ${unlocked ? 'n-interactive' : 'locked'}`, attrs: { tabindex: unlocked ? 0 : -1 } },
       h('img', { class: 'n-ab-icon', attrs: { src: abilityIcon(def, skill, !unlocked), alt: '', draggable: 'false' } }),
       h('div', { class: 'n-ab-main' },
-        h('div', { class: 'n-ab-name' }, h('span', { text: def.name }), onBar >= 0 ? h('span', { class: 'n-key', text: String((onBar + 1) % 10) }) : null),
+        h('div', { class: 'n-ab-name' }, h('span', { text: def.name }), onBar >= 0 ? h('span', { class: 'n-key', text: primaryKey(HOTBAR_ACTIONS[onBar], currentOverrides()) }) : null),
         h('div', { class: 'n-ab-meta', text: unlocked ? [cost, def.cooldown ? `${fmtDuration(def.cooldown)} cd` : '', def.targeting !== 'passive' ? titleize(def.targeting) : 'Passive'].filter(Boolean).join(' · ') : `Unlocks at level ${level ?? '?'}` }),
         def.description ? h('div', { class: 'n-ab-desc', text: def.description }) : null,
       ),
     );
-    tooltip.bind(el, () => abilityCard(def, { unlocked, unlockLevel: level, cooldownLeft: cdLeft, hint: unlocked && def.targeting !== 'passive' ? 'Drag onto the hotbar, or press Enter to place it in the first free slot' : undefined }));
+    tooltip.bind(el, () => abilityCard(def, { unlocked, unlockLevel: level, cooldownLeft: cdLeft, hint: unlocked && def.targeting !== 'passive' ? `Drag onto the hotbar, or ${touchMode() ? 'double-tap' : 'press Enter'} to place it in the first free slot` : undefined }));
     if (unlocked && def.targeting !== 'passive') {
       drag.source(el, () => ({ kind: 'ability', id }), () => abilityIcon(def, skill));
-      el.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter') return;
+      const place = () => {
         const hb = p.skills.hotbar;
         let slot = -1;
         for (let i = 0; i < 10; i++) if (!hb[i]) { slot = i; break; }
         if (slot >= 0) this.host.ctx.send({ t: 'hotbar', slot, value: id });
         else this.host.notify('Your hotbar is full — drag the ability onto a slot to replace it.', 'warn');
+      };
+      el.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') place();
       });
+      // Touch has no Enter key: a double-tap places it (mouse players drag or press Enter, as before).
+      onDouble(el, () => touchMode() && place());
     }
     return el;
   }

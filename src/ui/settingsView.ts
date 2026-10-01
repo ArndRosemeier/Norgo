@@ -1,63 +1,29 @@
 /**
  * Settings editor shared by the title menu and the in-game panel: graphics
- * presets & details, audio mix, controls (sensitivity, FOV, key bindings),
- * interface options and LLM brain endpoints for NPC dialog and the game master.
+ * presets & details, audio mix, controls (sensitivity, FOV, key bindings, touch
+ * controls), interface options and LLM brain endpoints for NPC dialog and the game master.
+ *
+ * The controls table and the rebind rows are generated from the command registry
+ * (src/client/commands.ts), like every other controls list in the game.
  */
 import { h } from './dom';
 import { slider, toggle, segmented, tabs } from './widgets';
-import { settingsStore, keyLabel, UI_KEY_CODES, type GameSettings, type LlmSettings, type MusicStyleSetting, type QualityPreset } from './settings';
+import { settingsStore, PRESET_OPTIONS, type GameSettings, type LlmSettings, type MusicStyleSetting, type QualityPreset } from './settings';
 import { glyphSvg } from './icons';
-import { DEFAULT_KEYS } from '../client/input';
+import { COMMANDS, keyConflict, keyLabel, keysOf, type CommandDef } from '../client/commands';
+import { controlsTable, currentOverrides } from './controls';
+import { platform } from '../core/platform';
 
-export interface KeyBind {
-  /** Key labels; a function for rebindable keys (read from the settings when drawn). */
-  keys: string[] | (() => string[]);
-  action: string;
-  group: 'Movement' | 'Combat' | 'Interface';
-}
-
-const targetKey = () => keyLabel(settingsStore.get().controls.targetKey || 'Tab');
-
-export const KEYBINDS: KeyBind[] = [
-  { keys: ['W', 'A', 'S', 'D'], action: 'Move', group: 'Movement' },
-  { keys: ['Space'], action: 'Jump / swim up', group: 'Movement' },
-  { keys: ['Shift'], action: 'Sprint', group: 'Movement' },
-  { keys: ['C'], action: 'Crouch / sneak', group: 'Movement' },
-  { keys: ['E'], action: 'Interact / talk / pick up', group: 'Movement' },
-  { keys: ['LMB'], action: 'Attack / use', group: 'Combat' },
-  { keys: ['RMB'], action: 'Block / aim', group: 'Combat' },
-  { keys: ['1', '…', '0'], action: 'Hotbar abilities & items', group: 'Combat' },
-  { keys: () => [targetKey()], action: 'Next target (attacks & spells aim at it)', group: 'Combat' },
-  { keys: () => ['Shift', targetKey()], action: 'Previous target', group: 'Combat' },
-  { keys: ['Esc'], action: 'Clear target', group: 'Combat' },
-  { keys: ['I'], action: 'Inventory & equipment', group: 'Interface' },
-  { keys: ['K'], action: 'Skills & abilities', group: 'Interface' },
-  { keys: ['J'], action: 'Journal & quests', group: 'Interface' },
-  { keys: ['M'], action: 'World map', group: 'Interface' },
-  { keys: ['G'], action: 'Ask the Game Master', group: 'Interface' },
-  { keys: ['Esc'], action: 'Pause / close panel', group: 'Interface' },
-  { keys: ['F3'], action: 'Debug overlay', group: 'Interface' },
-];
-
-export function keybindTable(): HTMLElement {
-  const groups = ['Movement', 'Combat', 'Interface'] as const;
-  return h('div', { class: 'n-keybinds' },
-    ...groups.map((g) => h('div', { class: 'n-keybind-group' },
-      h('div', { class: 'n-heading', text: g }),
-      ...KEYBINDS.filter((k) => k.group === g).map((k) => h('div', { class: 'n-keybind' },
-        h('span', { text: k.action }),
-        h('span', { class: 'n-keys' }, ...(typeof k.keys === 'function' ? k.keys() : k.keys).map((key) => (key === '…' ? h('span', { class: 'n-faint', text: '…' }) : h('span', { class: 'n-key', text: key })))),
-      )),
-    )),
-  );
-}
 
 /**
- * A "press a key" binding row. Listens in the capture phase so the key never reaches the game
- * or the panel (Esc cancels instead of closing the settings). Keys owned by the interface or by
- * another gameplay action are refused with a short explanation.
+ * A "press a key" binding row for a rebindable command. Listens in the capture phase so the
+ * key never reaches the game or the panel (Esc cancels instead of closing the settings). Keys
+ * owned by another command are refused with a short explanation.
  */
-function rebindRow(label: string, code: string, action: string, onSet: (code: string) => void): HTMLElement {
+function rebindRow(cmd: CommandDef, onSet: (code: string) => void): HTMLElement {
+  let code = keysOf(cmd.id, currentOverrides())[0];
+  const derived = COMMANDS.filter((c) => c.follows?.command === cmd.id);
+  const label = cmd.label + (derived.length ? ` (${derived.map((d) => `${d.follows!.modifier} + key: ${d.short.toLowerCase()}`).join(', ')})` : '');
   const btn = h('button', { class: 'n-btn small n-rebind', text: keyLabel(code), attrs: { type: 'button', title: 'Click, then press the new key (Esc cancels)' } });
   const note = h('span', { class: 'n-rebind-note' });
   let listening = false;
@@ -77,9 +43,9 @@ function rebindRow(label: string, code: string, action: string, onSet: (code: st
       stop();
       return;
     }
-    const owner = DEFAULT_KEYS[e.code];
-    if (UI_KEY_CODES.includes(e.code) || (owner && owner !== action)) {
-      note.textContent = `${keyLabel(e.code)} is already used${owner ? ` (${owner})` : ' by the interface'}.`;
+    const owner = keyConflict(e.code, cmd.id);
+    if (owner) {
+      note.textContent = `${keyLabel(e.code)} is already used (${owner.short.toLowerCase()}).`;
       return;
     }
     note.textContent = '';
@@ -134,7 +100,7 @@ export class SettingsView {
         kids = [
           sec('Quality preset',
             segmented<QualityPreset>(
-              [{ id: 'low', label: 'Low' }, { id: 'medium', label: 'Medium' }, { id: 'high', label: 'High' }, { id: 'ultra', label: 'Ultra' }, { id: 'custom', label: 'Custom' }],
+              PRESET_OPTIONS,
               g.preset,
               (v) => {
                 if (v !== 'custom') settingsStore.applyPreset(v);
@@ -145,7 +111,7 @@ export class SettingsView {
           sec('Detail',
             slider('Render scale', g.renderScale, { min: 0.5, max: 1.5, step: 0.05, format: pct, onInput: (v) => up({ renderScale: v }) }),
             slider('View distance', g.viewDistance, { min: 300, max: 4000, step: 50, format: (v) => `${(v / 1000).toFixed(1)} km`, onInput: (v) => up({ viewDistance: v }) }),
-            slider('Vegetation', g.vegetation, { min: 0.25, max: 1.5, step: 0.05, format: pct, onInput: (v) => up({ vegetation: v }) }),
+            slider('Vegetation', g.vegetation, { min: 0.25, max: 1, step: 0.05, format: pct, onInput: (v) => up({ vegetation: v }) }),
             h('div', { class: 'n-slider n-select-row' }, h('span', { text: 'Shadows' }),
               segmented([{ id: 'off', label: 'Off' }, { id: 'low', label: 'Low' }, { id: 'high', label: 'High' }], g.shadows, (v) => up({ shadows: v })), h('span')),
             toggle('Bloom', g.bloom, (v) => up({ bloom: v })),
@@ -155,6 +121,9 @@ export class SettingsView {
           sec('Display',
             slider('Field of view', g.fov, { min: 55, max: 110, step: 1, format: (v) => `${Math.round(v)}°`, onInput: (v) => up({ fov: v }) }),
             slider('Frame cap', g.maxFps, { min: 0, max: 240, step: 10, format: (v) => (v === 0 ? 'Off' : `${v}`), onInput: (v) => up({ maxFps: v }) }),
+          ),
+          sec('Device',
+            h('a', { class: 'n-btn small ghost', text: 'Device diagnostics', title: 'Capabilities, benchmarks and a copyable report', attrs: { href: '?diag', target: '_blank', rel: 'noopener' } }),
           ),
         ];
         break;
@@ -190,24 +159,36 @@ export class SettingsView {
       }
       case 'controls': {
         const c = s.controls;
+        const t = s.touch;
         const up = (patch: Partial<GameSettings['controls']>) => settingsStore.update('controls', patch);
-        kids = [
+        const upT = (patch: Partial<GameSettings['touch']>) => settingsStore.update('touch', patch);
+        const touchSec = sec('Touch controls',
+          slider('Look sensitivity', t.lookSensitivity, { min: 0.3, max: 3, step: 0.05, format: (v) => `${v.toFixed(2)}×`, onInput: (v) => upT({ lookSensitivity: v }) }),
+          slider('Thumb-stick size', t.stickSize, { min: 0.7, max: 1.5, step: 0.05, format: (v) => `${Math.round(v * 100)}%`, onInput: (v) => upT({ stickSize: v }) }),
+          slider('Button opacity', t.opacity, { min: 0.3, max: 1, step: 0.05, format: (v) => `${Math.round(v * 100)}%`, onInput: (v) => upT({ opacity: v }) }),
+          toggle('Left-handed layout (stick right, buttons left)', t.leftHanded, (v) => upT({ leftHanded: v })),
+          toggle('Push the stick past its ring to sprint', t.sprintRing, (v) => upT({ sprintRing: v })),
+        );
+        const rebinds = COMMANDS.filter((cmd) => cmd.rebind).map((cmd) => rebindRow(cmd, (code) => {
+          up({ [cmd.rebind!]: code } as Partial<GameSettings['controls']>);
+          this.render();
+        }));
+        const keyboard = [
           sec('Mouse',
             slider('Sensitivity', c.mouseSensitivity, { min: 0.2, max: 3, step: 0.05, format: (v) => `${v.toFixed(2)}×`, onInput: (v) => up({ mouseSensitivity: v }) }),
-            toggle('Invert vertical look', c.invertY, (v) => up({ invertY: v })),
+            toggle('Invert vertical look (mouse & touch)', c.invertY, (v) => up({ invertY: v })),
           ),
           sec('Movement',
             toggle('Toggle sprint (instead of hold)', c.toggleSprint, (v) => up({ toggleSprint: v })),
             toggle('Toggle crouch (instead of hold)', c.toggleCrouch, (v) => up({ toggleCrouch: v })),
           ),
-          sec('Rebind',
-            rebindRow('Cycle targets (Shift + key: backwards)', c.targetKey || 'Tab', 'target', (code) => {
-              up({ targetKey: code });
-              this.render();
-            }),
-          ),
-          sec('Key bindings', keybindTable()),
+          sec('Rebind', ...rebinds),
+          sec('Key bindings', controlsTable('mouse')),
         ];
+        // Touch players see their controls first; the keyboard part stays for attached keyboards.
+        kids = platform.inputMode === 'touch' || platform.info.touch
+          ? (platform.inputMode === 'touch' ? [touchSec, sec('Touch gestures & buttons', controlsTable('touch')), ...keyboard] : [...keyboard, touchSec])
+          : keyboard;
         break;
       }
       case 'interface': {
@@ -243,6 +224,8 @@ export class SettingsView {
         onclick: () => {
           const sec = this.tabs.value as Exclude<Section, 'ai'>;
           settingsStore.reset(sec);
+          // The controls tab also edits the touch section.
+          if (sec === 'controls') settingsStore.reset('touch');
           this.render();
         },
       }))

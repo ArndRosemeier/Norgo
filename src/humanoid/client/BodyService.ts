@@ -10,6 +10,7 @@ import { buildCharacter, type CharacterBuild } from '../characterBuild';
 import type { HumanoidAppearance } from '../types';
 import { getHumanStatic, type HumanStatic } from './staticData';
 import { CharacterGeometry } from './Character';
+import { budgets } from '../../core/budgets';
 
 interface Job {
   id: number;
@@ -51,7 +52,7 @@ export class BodyService {
   private constructor() {
     this.assetsP = loadHumanAssets();
     try {
-      const n = Math.max(1, Math.min(3, (navigator.hardwareConcurrency || 4) >> 2));
+      const n = budgets.bodyWorkers;
       for (let i = 0; i < n; i++) {
         const w = new Worker(new URL('../body.worker.ts', import.meta.url), { type: 'module' });
         w.addEventListener('message', (e) => this.onMessage(w, e.data));

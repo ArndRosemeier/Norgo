@@ -37,6 +37,11 @@ export class WeatherFx {
   private kind: WeatherState['kind'] = 'clear';
   /** Live estimate for the debug HUD. */
   spawnedLastFrame = 0;
+  /**
+   * Particle density 0..1: graphics setting (weather particles off → 0) × device budget.
+   * Set by FxSystem every frame; lightning and thunder are unaffected.
+   */
+  density = 1;
   /** Called when a bolt's thunder reaches the camera (position, volume 0..1). */
   onThunder: ((x: number, y: number, z: number, volume: number) => void) | null = null;
 
@@ -106,17 +111,18 @@ export class WeatherFx {
     if (L < 0.01 && w.kind !== 'storm') return;
     this.fill(cam.x, cam.z, 40);
     const wx = w.windX, wz = w.windZ;
-    let budget = MAX_PER_FRAME;
+    const S = this.density;
+    let budget = Math.round(MAX_PER_FRAME * Math.min(1, S));
     switch (this.kind) {
       case 'rain':
-        budget = this.rain(dt, cam, surface, 6500 * L, false, wx, wz, budget);
+        budget = this.rain(dt, cam, surface, 6500 * L * S, false, wx, wz, budget);
         break;
       case 'storm':
-        budget = this.rain(dt, cam, surface, 9500 * L, true, wx, wz, budget);
+        budget = this.rain(dt, cam, surface, 9500 * L * S, true, wx, wz, budget);
         this.storm(dt, cam, L, time);
         break;
       case 'snow': {
-        this.acc[2] += 2600 * L * dt;
+        this.acc[2] += 2600 * L * S * dt;
         let n = Math.min(budget, Math.floor(this.acc[2]));
         this.acc[2] -= n;
         const p = resetP();
@@ -140,7 +146,7 @@ export class WeatherFx {
         break;
       }
       case 'ashfall': {
-        this.acc[3] += 1400 * L * dt;
+        this.acc[3] += 1400 * L * S * dt;
         let n = Math.min(budget, Math.floor(this.acc[3]));
         this.acc[3] -= n;
         while (n-- > 0) {
@@ -171,7 +177,7 @@ export class WeatherFx {
         break;
       }
       case 'sporefall': {
-        this.acc[4] += 500 * L * dt;
+        this.acc[4] += 500 * L * S * dt;
         let n = Math.min(budget, Math.floor(this.acc[4]));
         this.acc[4] -= n;
         const p = resetP();
@@ -194,7 +200,7 @@ export class WeatherFx {
         break;
       }
       case 'fog': {
-        this.acc[5] += 28 * L * dt;
+        this.acc[5] += 28 * L * S * dt;
         let n = Math.min(budget, Math.floor(this.acc[5]));
         this.acc[5] -= n;
         const p = resetP();
@@ -215,7 +221,7 @@ export class WeatherFx {
         break;
       }
     }
-    this.spawnedLastFrame = MAX_PER_FRAME - budget;
+    this.spawnedLastFrame = Math.round(MAX_PER_FRAME * Math.min(1, S)) - budget;
   }
 
   /** Rain streaks and ground splashes. Returns the remaining spawn budget. */

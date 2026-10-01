@@ -7,6 +7,7 @@
  */
 import './styles/base.css';
 import './styles/menu.css';
+import './styles/touch.css';
 import type { NewGameChoice } from './UI';
 import { h } from './dom';
 import { frame, confirmModal } from './widgets';

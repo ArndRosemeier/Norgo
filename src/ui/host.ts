@@ -7,6 +7,7 @@ import type { ClientContext } from '../client/context';
 import type { Vec3 } from '../shared/types';
 import { h } from './dom';
 import { frame } from './widgets';
+import { primaryKey } from '../client/commands';
 
 export type PanelId = 'inventory' | 'skills' | 'journal' | 'map' | 'gm' | 'dialog' | 'trade' | 'crafting' | 'settings' | 'pause';
 
@@ -52,7 +53,7 @@ export abstract class Panel {
     this.box = frame(`n-panel ${cls}`, this.head, this.body);
     this.box.setAttribute('role', 'dialog');
     this.box.setAttribute('aria-label', title);
-    this.head.append(h('button', { class: 'n-close', html: '✕', title: 'Close (Esc)', attrs: { 'aria-label': 'Close' }, onclick: () => this.host.close(this.id) }));
+    this.head.append(h('button', { class: 'n-close', html: '✕', title: `Close (${primaryKey('pause')})`, attrs: { 'aria-label': 'Close' }, onclick: () => this.host.close(this.id) }));
     this.root = h('div', { class: 'n-panel-wrap n-hidden' }, this.box);
     this.root.addEventListener('pointerdown', (e) => {
       // Clicking the dimmed backdrop closes the panel.

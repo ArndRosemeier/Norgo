@@ -4,8 +4,10 @@
 import { Panel, type UiHost } from '../host';
 import { h } from '../dom';
 import { glyphSvg } from '../icons';
-import { SettingsView, keybindTable } from '../settingsView';
+import { SettingsView } from '../settingsView';
+import { controlsTable } from '../controls';
 import { confirmModal } from '../widgets';
+import { autoFocusField } from '../gestures';
 import type { GmMessage } from '../../gm/types';
 import type { LlmSettings } from '../settings';
 import { BIOMES } from '../../world/biomes';
@@ -75,7 +77,7 @@ export class GmPanel extends Panel {
   }
 
   protected override onOpen() {
-    setTimeout(() => this.input.focus(), 30);
+    autoFocusField(this.input);
     this.scroll();
   }
 }
@@ -105,7 +107,7 @@ export class PausePanel extends Panel {
     super(host, 'Paused', 'n-pause-panel');
     this.dim = true;
     this.info = h('div', { class: 'n-pause-info' });
-    this.keys = h('div', { class: 'n-pause-keys n-hidden' }, keybindTable());
+    this.keys = h('div', { class: 'n-pause-keys n-hidden' });
     this.saveBtn = h('button', { class: 'n-pause-item', html: `${glyphSvg('book', 18)}<span>Save journey</span>`, onclick: () => this.save() });
     const item = (label: string, glyph: string, fn: () => void) => h('button', { class: 'n-pause-item', html: `${glyphSvg(glyph, 18)}<span>${label}</span>`, onclick: fn });
     this.body.classList.add('n-pause-body');
@@ -118,8 +120,8 @@ export class PausePanel extends Panel {
         item('World map', 'mountain', () => host.open('map')),
         item('Settings', 'key', () => host.open('settings')),
         item('Controls', 'hand', () => {
-          // Rebuilt on open so rebinds made in the settings show up.
-          if (this.keys.classList.contains('n-hidden')) this.keys.replaceChildren(keybindTable());
+          // Rebuilt on open so rebinds made in the settings (and the input mode) show up.
+          if (this.keys.classList.contains('n-hidden')) this.keys.replaceChildren(controlsTable());
           this.keys.classList.toggle('n-hidden');
         }),
         item('Guide', 'book', () => {

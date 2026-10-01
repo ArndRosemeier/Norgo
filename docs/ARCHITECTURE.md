@@ -31,7 +31,7 @@ looking down (three.js `rotation.y`). Terrain density `> 0` = solid.
 
 | Path | Contents |
 | --- | --- |
-| `src/core/` | rng, noise, math, events (lead) |
+| `src/core/` | rng, noise, math, events, platform (device & capabilities), budgets (device resource limits) (lead) |
 | `src/world/` | profile, biomes, materials, generator (density), sites/roads/POIs, mesher, chunk workers, streamer (octree LOD), collider, edits, terrain material/textures (lead) |
 | `src/render/` | RenderCore, Environment (sun, moons, sky, fog, weather visuals), water, sky occlusion (lead) |
 | `src/shared/` | protocol + shared types (lead) |
@@ -167,6 +167,20 @@ line of sight) before aiming swings, shots (led + drop-compensated) and aimed ab
 Invalid locks silently fall back to the crosshair aim. The HUD listens to `ClientEvents.target`;
 `targetRequest` lets the UI clear it (Esc).
 
+### Commands & input (keyboard, mouse, touch)
+`src/client/commands.ts` is the single list of player commands (id, label, glyph, group, kind,
+default keys, rebind field, touch method). Everything derives from it: `Input`'s key map, the
+UI's panel/guide/pause keys (`UI.runCommand`), Settings → Controls (table + rebind rows), the
+pause menu, welcome guide, HUD key hints (via `src/ui/controls.ts`), the touch controls and the
+README controls table (`tools/commands-check.ts --write`; `npm test` fails when it is stale).
+`Input` (`src/client/input.ts`) is source-agnostic: keys, mouse and the on-screen controls
+(`ctx.controls: VirtualControls` — stick axes, button holds, look, zoom) feed the same actions;
+movement axes are analog. `src/core/platform.ts` decides the live input mode; touch controls
+(`src/ui/hud/touch.ts`) show only in touch mode. Mouse/touch interaction rules for widgets
+(long-press = right-click, double-tap = double-click, tooltips on hold, drag vs. hold,
+on-screen keyboard) live in `src/ui/gestures.ts` — use `onSecondary` / `onDouble` /
+`tooltip.bind` instead of raw `contextmenu` / `dblclick` / hover listeners.
+
 ### Player controller (lead) understands
 * `PlayerState.stats.moveSpeed` (multiplier), `stats.jump` (multiplier),
   `gravityMul`, and effect ids `haste, slow, root, stun, featherfall, levitate,
@@ -217,8 +231,16 @@ Music style switches between "Adaptive score" (the default) and "Generative only
   and a bus lowpass. Exploration stems follow the director's episodes, while combat and boss
   always play. Exploration crossfades take about 5–7 s. Combat enters on the next beat of
   the current set in about 1.2 s and leaves with a 6 s fade. The player preloads combat and
-  the likely next set (dusk → night, cave mouth, settlement edge). At most 3 sets
-  (≈ 60–90 MB decoded each) stay resident, evicted LRU with a 240 MB cap.
+  the likely next set (dusk → night, cave mouth, settlement edge). Residency follows the
+  device budget (`budgets.stemSets/stemBytes/stemMelodies/stemLoads`): desktops keep 3 sets
+  (≈ 60–90 MB decoded each) under 240 MB, tablets 2 sets under ≈ 130 MB with one melody
+  variation and one decode at a time, evicted LRU.
+* **Codec gate.** Stems are Ogg Opus. `src/audio/codecProbe.ts` decides once per session (cached
+  per user agent): Chromium/Firefox are trusted; on WebKit (all iOS/iPadOS browsers, Safari) or
+  when `canPlayType` says no, one real stem is decoded with an `OfflineAudioContext` (no gesture
+  needed) as soon as the manifest is in. If that fails the stem layer stays silent for the
+  session — no fetches, no retries, no manifest re-polls — the generative score plays alone, and
+  the verdict shows in F3 (`stems unavailable: …`), `stems.status().codec` and `?diag`.
 * **Tuning policy.** `stemTuningPolicy(theme.tuning)`. A world is 12-TET-compatible when its
   octave is exactly 1200 cents and every degree is a whole semitone. Those worlds get all
   layers ('full'), and the director steps back: its drone, pad, arpeggio, bass, choir and
@@ -257,3 +279,61 @@ Shader compiles are the main source of hitches (0.2–1.5 s each on Windows/ANGL
 * Prefer shared materials (or few variants) over per-object materials with distinct defines.
 * `?prof` logs slow frames with their section breakdown and the programs compiled in them;
   `norgo.prof.report()` in the console.
+
+### Capabilities & fallbacks
+`RenderCore` decides its setup from `platform.probeGL()` (a throwaway context, because the
+renderer's constructor options can't change later) and records the live context with
+`platform.attachGL()`. Test every fallback on a desktop with `?caps=…` (see `src/core/platform.ts`);
+`?diag` shows what a device really does.
+* **Depth.** With EXT_clip_control: reversed-Z. Reversed-Z only helps with a *float* depth buffer,
+  so where the scene target would get D24 (D3D/ANGLE on Windows) RenderCore gives three's internal
+  HDR scene target a 32F `DepthTexture` before its first use (error at 5 km: centimetres instead of
+  ~10 m). Apple GPUs need nothing — Metal has no 24-bit depth there, ANGLE allocates Depth32Float.
+  Without clip control: the standard depth range with the same 0.15 m / 16 km planes — the
+  precision the D24 desktop path always had (≈ 0.4 m at 1 km, ≈ 10 m at 5 km; distant terrain is
+  one surface per LOD, so no visible fighting). Rejected: logarithmic depth (writes gl_FragDepth →
+  no early-Z and no hidden-surface removal on tile-based GPUs like the iPad's — a big fill-rate
+  cost under foliage) and a larger near plane (third-person camera clips into walls).
+  `core.depthMode` / `core.depthInfo()` report it.
+* **Colour.** HDR half-float output buffer (tone mapping in three's final pass, bloom + SMAA via
+  `setEffects`) when an RGBA16F framebuffer is really complete; otherwise an 8-bit path: tone
+  mapping in the materials, no post effects (`core.hdr`, `core.effectsAvailable`). Data textures
+  that need linear filtering use half floats when OES_texture_float_linear is missing (water).
+* **Shader gate without KHR_parallel_shader_compile.** Compiles block wherever the driver first
+  needs them, so the gate *paces*: parked objects queue and `pump()` compiles them before the frame
+  (at least one object per frame, more while under 6 ms), forcing the link there. Total compile
+  time is the driver's; the gate never adds a stall nor bunches programs into one frame.
+* **Context loss** (iOS reclaims GPU memory of background tabs): rendering pauses until the browser
+  restores the context; three re-uploads buffers/textures from CPU copies, the gate forgets its
+  compiled state, and GPU-only content is redrawn via `core.onContextRestored(fn)` (flora impostor
+  atlas). Keep CPU copies of geometry and data textures (don't free arrays after upload).
+
+## Platform, budgets & app shell
+* **`src/core/platform.ts`** — the only place that sniffs the device: form factor (iPadOS reports a
+  Mac UA; touch points decide), WebKit, touch/pointer and the live input mode, cores, memory, GPU
+  caps, audio formats, `notes` (engine decisions for diagnostics) and `report()`. Don't probe
+  features or user agents anywhere else.
+* **`src/core/budgets.ts`** — device class (`desktop`, `desktop-low`, `tablet`, `phone`) → one
+  table of limits: chunk/body worker counts, streamer chunk cache, collider grids, stem residency,
+  pattern textures, blueprint/POI/settlement caches, server object-chunk cache, pixel-ratio cap,
+  weather particle density. Read the value at use time. Workers can't see the device: the server
+  worker gets the class in its init message (`applyDeviceClass`). Tablet numbers are small on
+  purpose: iPadOS kills a Safari tab (workers included) far below the device's RAM.
+* **Graphics settings → engine** go through `applyGraphicsSettings` (`src/client/graphics.ts`), used
+  by the Game and the `?diag` benchmark. Presets live in `src/ui/settings.ts`; first run (no saved
+  settings) and "Restore defaults" use `deviceGraphicsDefaults()`: *Tablet* (render scale 0.75 of
+  the 1.5-capped DPR, 1.1 km, low shadows, 60 % ground cover, 60 fps cap) on tablets, *Low* on
+  phones, *Medium* on modest desktops, *High* otherwise. `vegetation` thins id-less ground cover
+  when chunks are scattered; `weatherFx` × the budget scales weather particles.
+* **`src/client/appShell.ts`** — app behaviour: one background/foreground signal
+  (visibilitychange, pagehide/pageshow, freeze/resume), Screen Wake Lock while playing outside
+  menus (secure contexts only), fullscreen on the first tap of a touch-first device (standard or
+  webkit-prefixed; otherwise a one-time "Add to Home Screen" hint on iOS), and the rotate-to-
+  landscape overlay. On background the Game saves (≤ every 30 s) and opens the pause menu.
+* **Shell files**: `index.html` (viewport-fit=cover, no page zoom, Apple web-app metas),
+  `public/manifest.webmanifest`, `public/icons/` (generated by `tools/make-icons.ts`), and
+  `src/ui/styles/platform.css` (no overscroll/pinch/callouts on the game surface, inputs stay
+  selectable, `--safe-top/right/bottom/left` for the HUD).
+* **Audio unlock**: `AudioEngine.installUnlock` keeps gesture listeners (touchend, click,
+  pointerup, keydown…) for the whole session and resumes inside the handler — iOS needs that
+  after interruptions ('interrupted' state) as well as at first start.

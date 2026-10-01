@@ -1,8 +1,11 @@
 /**
  * Norgo entry point: title menu → world creation → game.
- * `?quick=<seed>` skips the menu (development), `?viewer` opens the free-fly terrain viewer.
+ * `?quick=<seed>` skips the menu (development), `?viewer` opens the free-fly terrain viewer,
+ * `?diag` the device diagnostics page (capabilities, benchmarks, copyable report).
  */
 import './style.css';
+import './ui/styles/platform.css';
+import { appShell } from './client/appShell';
 import { Game } from './client/Game';
 import { showMainMenu } from './ui/menu';
 import type { NewGameChoice } from './ui/UI';
@@ -46,6 +49,12 @@ function loadingScreen() {
 }
 
 async function boot() {
+  if (params.has('diag')) {
+    await import('./tools/diag');
+    return;
+  }
+  // App behaviour on tablets/phones: lifecycle, wake lock, fullscreen, rotate hint.
+  appShell.install();
   if (params.has('viewer')) {
     await import('./tools/viewer');
     return;

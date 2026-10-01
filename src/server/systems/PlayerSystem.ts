@@ -268,7 +268,8 @@ export class PlayerSystem implements ServerSystem {
     const ctx = this.ctx;
     switch (cmd) {
       case 'tp': {
-        const [x, y, z] = args as number[];
+        const [x, y, z] = (args as unknown[]).map((v) => (v === null || v === undefined ? NaN : Number(v)));
+        if (!Number.isFinite(x) || !Number.isFinite(z)) break;
         const gy = Number.isFinite(y) ? y : ctx.gen.findGround(x, 600, z, 1200);
         p.pos = [x, (Number.isFinite(gy) ? gy : 100) + 1, z];
         p.tags.add('teleportGrace');

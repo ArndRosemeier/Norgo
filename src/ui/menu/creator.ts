@@ -10,6 +10,7 @@ import { HumanoidPreview } from '../../humanoid/client/preview';
 import { Rng } from '../../core/rng';
 import { h, setChildren } from '../dom';
 import { frame, slider, toggle, segmented, tabs } from '../widgets';
+import { touchMode } from '../gestures';
 import { raceDef, raceIds, skillOrStub } from '../data';
 import { rgbHex, hexRgb, statLine, titleize } from '../format';
 import { glyphSvg } from '../icons';
@@ -151,7 +152,7 @@ export class CharacterCreator {
           h('button', { class: 'n-btn small', html: `${glyphSvg('star', 14)} Randomize`, onclick: () => this.randomize(false) }),
           h('button', { class: 'n-btn small ghost', title: 'Random race, body and name', html: `${glyphSvg('sparkle', 14)} Surprise me`, onclick: () => this.randomize(true) }),
         ),
-        h('div', { class: 'n-cc-hint n-faint', text: 'Drag to rotate · scroll to switch focus' }),
+        h('div', { class: 'n-cc-hint n-faint', text: touchMode() ? 'Drag to rotate' : 'Drag to rotate · scroll to switch focus' }),
       ),
       frame('n-cc-right', this.editorTabs.el, this.editor),
     );

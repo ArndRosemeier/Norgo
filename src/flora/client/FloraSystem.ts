@@ -93,6 +93,27 @@ const ZERO = new THREE.Matrix4().makeScale(0, 0, 0);
 const UP = new THREE.Vector3(0, 1, 0);
 const kindTmp: ParsedKind = { sp: -1, variant: 0, mat: -1 };
 
+/**
+ * Keep a deterministic `density` fraction (0.25..1) of a scatter batch: a per-instance hash
+ * decides, so the thinning is even (not a cut-off region) and stable across re-streams.
+ * Returns the input unchanged at density ≥ 1.
+ */
+function thinInstances(d: Float32Array, density: number, salt: number): Float32Array {
+  if (!(density < 1)) return d;
+  const n = d.length / SCATTER_STRIDE;
+  const keep = Math.max(0.25, density);
+  const out = new Float32Array(d.length);
+  let k = 0;
+  for (let i = 0; i < n; i++) {
+    let h = Math.imul(i + 1, 0x9e3779b1) ^ Math.imul(salt | 0, 0x85ebca6b);
+    h = Math.imul(h ^ (h >>> 15), 0x2c1b3c6d);
+    if (((h ^ (h >>> 13)) >>> 0) / 4294967296 >= keep) continue;
+    out.set(d.subarray(i * SCATTER_STRIDE, (i + 1) * SCATTER_STRIDE), k * SCATTER_STRIDE);
+    k++;
+  }
+  return out.slice(0, k * SCATTER_STRIDE);
+}
+
 /** Compose an instance matrix from scatter data (local to the chunk group). */
 function composeInstance(d: Float32Array, o: number, out: THREE.Matrix4, extraQ?: THREE.Quaternion, scaleMul = 1) {
   tmpE.set(d[o + 5], d[o + 3], d[o + 6], 'XZY');
@@ -128,6 +149,8 @@ export class FloraSystem implements ClientModule {
     this.offs.push(ev.on('chunkDisposed', ({ entry }) => this.onDisposed(entry)));
     this.offs.push(ev.on('chunkMeshed', ({ entry }) => this.onMeshed(entry)));
     this.offs.push(ctx.events.on('objects', (states) => this.onStates(states, true)));
+    // Impostor atlas lives only on the GPU: redraw it after a context loss (iOS background tabs).
+    this.offs.push(ctx.core.onContextRestored(() => this.lib.recaptureImpostors()));
     // States known before we were initialised (save loaded, join).
     if (ctx.state.objects.size) this.onStates([...ctx.state.objects.values()], false);
   }
@@ -143,11 +166,14 @@ export class FloraSystem implements ClientModule {
       parseKind(b.kind, kindTmp);
       const sp = this.lib.cat.species[kindTmp.sp];
       if (!sp) continue;
-      const n = b.data.length / SCATTER_STRIDE;
-      if (n === 0) continue;
       const tier = Math.min(lod, 3);
       const fg = tier === 3 && sp.cls === 'tree' ? this.lib.impostor(sp.idx, kindTmp.variant) : this.lib.geometry(sp.idx, kindTmp.variant, kindTmp.mat, Math.min(tier, 2));
       if (!fg) continue;
+      // Vegetation setting (graphics preset / device profile): thin decorative ground cover.
+      // Only id-less batches (no server objects, colliders or states depend on their indices).
+      const d = fg.kind === 'grass' && !b.ids ? thinInstances(b.data, this.ctx.core.settings.vegetation, entry.ox * 31 + entry.oz * 17 + entry.oy) : b.data;
+      const n = d.length / SCATTER_STRIDE;
+      if (n === 0) continue;
       const material = this.lib.materials[fg.kind];
       const mesh = new THREE.InstancedMesh(fg.geo, material, n);
       mesh.name = 'flora:' + sp.key;
@@ -157,7 +183,6 @@ export class FloraSystem implements ClientModule {
       mesh.castShadow = sp.shadow && (sp.cls === 'tree' ? tier <= 1 : tier === 0);
       mesh.receiveShadow = fg.kind !== 'impostor';
       const inst = new Float32Array(n * 3);
-      const d = b.data;
       for (let i = 0; i < n; i++) {
         const o = i * SCATTER_STRIDE;
         const packed = d[o + 7];

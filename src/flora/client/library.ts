@@ -233,6 +233,25 @@ export class FloraLibrary {
     const cell = this.impostorCells.size;
     if (cell >= IMPOSTOR_COLS * IMPOSTOR_ROWS) return -1;
     this.ensureImpostorTarget();
+    this.renderImpostorCell(sp, variant, cell);
+    this.impostorCells.set(key, cell);
+    return cell;
+  }
+
+  /**
+   * Re-draw every captured impostor (after a WebGL context loss the atlas render target comes
+   * back empty: three recreates GPU resources, but render-target contents are GPU-only).
+   */
+  recaptureImpostors(): void {
+    if (!this.impostorRT || !this.renderer) return;
+    for (const [key, cell] of this.impostorCells) {
+      const [spIdx, variant] = key.split(':').map(Number);
+      const sp = this.cat.species[spIdx];
+      if (sp) this.renderImpostorCell(sp, variant, cell);
+    }
+  }
+
+  private renderImpostorCell(sp: FloraSpecies, variant: number, cell: number): void {
     const renderer = this.renderer!;
     const rt = this.impostorRT!;
     const base = this.geometry(sp.idx, variant, -1, 0);
@@ -270,8 +289,6 @@ export class FloraLibrary {
     renderer.autoClear = prevAuto;
     renderer.setScissorTest(prevScissor);
     scene.remove(mesh);
-    this.impostorCells.set(key, cell);
-    return cell;
   }
 
   // ------------------------------------------------------------------ single (non-instanced) materials

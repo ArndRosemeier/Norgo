@@ -11,6 +11,7 @@
  */
 import * as THREE from 'three';
 import { Rng } from '../../../core/rng';
+import { budgets } from '../../../core/budgets';
 
 export type DisplayPattern =
   | 'plain' | 'stripes' | 'checks' | 'quilted' | 'chainmail' | 'scales' | 'leather' | 'fur' | 'embroidered' | 'patchwork' | 'silk'
@@ -20,7 +21,7 @@ type RGB = [number, number, number];
 
 const S = 256;
 const cache = new Map<string, { map: THREE.CanvasTexture; emissive: THREE.CanvasTexture | null }>();
-const MAX_CACHE = 48;
+/** Cache size comes from the device budget (`budgets.patternTextures`). */
 
 const css = (c: RGB, mul = 1, a = 1) =>
   `rgba(${Math.round(Math.min(1, c[0] * mul) * 255)},${Math.round(Math.min(1, c[1] * mul) * 255)},${Math.round(Math.min(1, c[2] * mul) * 255)},${a})`;
@@ -397,7 +398,7 @@ export function patternTexture(pattern: DisplayPattern, color: RGB, color2: RGB,
   map.anisotropy = 4;
   const out = { map, emissive };
   cache.set(key, out);
-  if (cache.size > MAX_CACHE) {
+  while (cache.size > budgets.patternTextures) {
     const first = cache.keys().next().value as string;
     cache.delete(first);
   }

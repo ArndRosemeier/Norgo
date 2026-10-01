@@ -8,6 +8,7 @@
 import type { ArchStyle, BuildingInfo, Heraldry, PropInfo, SettlementLayout } from '../types';
 import type { Vec3 } from '../../shared/types';
 import { deriveSeed } from '../../core/rng';
+import { budgets } from '../../core/budgets';
 import { Kit, Surf, jitter, scaleHex, type Blueprint } from './kit';
 import { makeCtx, type StyleBuilder, type BuildCtx } from './common';
 import { buildTimber } from './styleTimber';
@@ -20,13 +21,14 @@ import { STYLE_BUILDERS, STYLE_SILHOUETTES } from './registry';
 const DEFAULT_HERALDRY: Heraldry = { field: 0x2a4ab0, field2: 0xd0a020, charge: 0xf0f0e8, division: 'plain', emblem: 'star' };
 
 const cache = new Map<string, Blueprint>();
-const CACHE_MAX = 900;
 
+/** Cache size comes from the device budget (`budgets.blueprintCache`; this realm's own copy). */
 function remember(key: string, bp: Blueprint) {
   cache.set(key, bp);
-  if (cache.size > CACHE_MAX) {
+  const max = budgets.blueprintCache;
+  if (cache.size > max) {
     const it = cache.keys();
-    for (let i = 0; i < CACHE_MAX / 4; i++) cache.delete(it.next().value as string);
+    for (let i = 0, n = Math.max(1, Math.floor(max / 4)); i < n; i++) cache.delete(it.next().value as string);
   }
 }
 

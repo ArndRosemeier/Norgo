@@ -1,0 +1,159 @@
+/*
+ * Platform & touch-device rules (platform layer; imported by main.ts before any UI CSS).
+ * The page must behave like an app on iPad/iPhone/Android: no rubber-band scrolling or
+ * pull-to-refresh, no page pinch-zoom, no text selection / long-press callouts on the game
+ * surface — while text inputs keep working. Safe-area insets (notch, home indicator,
+ * rounded corners; needs viewport-fit=cover in index.html) are exposed for the HUD.
+ */
+
+:root {
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  /* Fallback for 100vh on mobile browsers whose toolbars change the viewport height. */
+  --app-height: 100dvh;
+}
+
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * No browser gestures on the game surface: page pinch-zoom, double-tap zoom and panning are
+ * off (touch controls get raw pointer events). UI panels that scroll opt back in with
+ * `touch-action: pan-y` / `pan-x` on their scroll containers.
+ */
+body,
+#app,
+#app canvas {
+  touch-action: none;
+}
+
+/* No selection or iOS long-press callout / magnifier on game chrome. */
+body {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* …but text fields stay fully usable (selection, caret, paste menu). */
+input,
+textarea,
+select,
+[contenteditable='true'],
+.np-selectable {
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+  touch-action: manipulation;
+}
+
+/* Scrollable UI regions: allow native panning inside them only. */
+.n-panel-body,
+.np-scroll {
+  touch-action: pan-x pan-y;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* iOS zooms into inputs with a font size below 16 px; avoid that on touch devices. */
+@media (pointer: coarse) {
+  input,
+  textarea,
+  select {
+    font-size: max(16px, 1em);
+  }
+}
+
+/* ------------------------------------------------------------------ rotate-to-landscape hint */
+
+.np-rotate {
+  display: none;
+}
+
+/* Touch-first tablets and phones in portrait (data-form/data-input are set by core/platform.ts). */
+@media (orientation: portrait) {
+  html[data-form='tablet'] .np-rotate,
+  html[data-form='phone'] .np-rotate {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: grid;
+    place-content: center;
+    justify-items: center;
+    gap: 22px;
+    padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
+    background: radial-gradient(ellipse at 50% 40%, #1b1a22 0%, #07080b 75%);
+    color: #e8e2d4;
+    font-family: Cinzel, serif;
+    letter-spacing: 0.12em;
+    text-align: center;
+    touch-action: none;
+  }
+}
+
+.np-rotate-icon {
+  width: 64px;
+  height: 104px;
+  border: 3px solid #d9b56a;
+  border-radius: 12px;
+  box-shadow: 0 0 24px rgba(217, 181, 106, 0.3);
+  animation: np-rotate 2.4s ease-in-out infinite;
+}
+
+.np-rotate-text {
+  font-size: 18px;
+  color: #d9b56a;
+}
+
+@keyframes np-rotate {
+  0%, 20% { transform: rotate(0deg); }
+  55%, 100% { transform: rotate(-90deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .np-rotate-icon { animation: none; transform: rotate(-90deg); }
+}
+
+/* ------------------------------------------------------------------ add-to-home-screen hint */
+
+.np-hint {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + var(--safe-bottom));
+  transform: translateX(-50%);
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 12px 14px 12px 18px;
+  border: 1px solid rgba(217, 181, 106, 0.45);
+  border-radius: 10px;
+  background: rgba(12, 12, 16, 0.92);
+  color: #e8e2d4;
+  font: 500 14px/1.4 Inter, system-ui, sans-serif;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5);
+  pointer-events: auto;
+}
+
+.np-hint b {
+  color: #d9b56a;
+}
+
+.np-hint button {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.08);
+  color: inherit;
+  font-size: 15px;
+  cursor: pointer;
+}
