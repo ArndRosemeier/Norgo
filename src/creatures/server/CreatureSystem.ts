@@ -504,9 +504,22 @@ export class CreatureSystem implements ServerSystem, CreatureService {
     return this.ctx.edits.query(x - 4, -1e4, z - 4, x + 4, 1e4, z + 4).length > 0;
   }
 
-  /** Ground below (x, y, z) — cached on a 1 m grid per 6 m height band. */
+  /**
+   * Ground below (x, y, z): bilinear between the four surrounding 1 m grid samples.
+   * (Snapping to the nearest sample put creatures up to half a metre × slope into the
+   * ground — small critters on slopes were half buried and hard to hit.)
+   */
   private ground(x: number, y: number, z: number): number {
-    const ix = Math.round(x), iz = Math.round(z), iy = Math.floor(y / 6);
+    const x0 = Math.floor(x), z0 = Math.floor(z), fx = x - x0, fz = z - z0;
+    const a = this.groundCell(x0, y, z0), b = this.groundCell(x0 + 1, y, z0);
+    const c = this.groundCell(x0, y, z0 + 1), d = this.groundCell(x0 + 1, y, z0 + 1);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(c) || !Number.isFinite(d)) return this.groundCell(Math.round(x), y, Math.round(z));
+    return (a * (1 - fx) + b * fx) * (1 - fz) + (c * (1 - fx) + d * fx) * fz;
+  }
+
+  /** Ground below a 1 m grid point — cached per 6 m height band. */
+  private groundCell(ix: number, y: number, iz: number): number {
+    const iy = Math.floor(y / 6);
     const key = ((ix + 32768) & 0xffff) * 4294967296 + ((iz + 32768) & 0xffff) * 65536 + ((iy + 32768) & 0xffff);
     let v = this.groundCache.get(key);
     if (v !== undefined) return v;

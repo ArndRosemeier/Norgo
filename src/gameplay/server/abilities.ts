@@ -252,12 +252,16 @@ export class AbilityRunner {
       }
       default:
         cx.point = point;
+        // Crosshair aim: the client's direction is the camera's, which sits behind and above
+        // the shoulder; cast along it from the eye and the line runs parallel but offset —
+        // small targets (critters) were missed. Aim from the eye at the crosshair point.
+        if (!locked && isVec3(use.point) && vdist(use.point, origin) > 1) cx.dir = vnorm(vsub(use.point, origin), dir);
         if (locked) {
           // Aimed at the tab target: projectiles lead it (see ProjectileSim), cones and strikes face it.
           cx.point = chestOf(locked);
           cx.dir = vnorm(vsub(cx.point, origin), dir);
           cx.target = locked;
-        } else if (!target && (def.targeting === 'aim' || def.targeting === 'cone')) cx.target = this.pick(caster, origin, dir, Math.min(range, 40), def, 0.12);
+        } else if (!target && (def.targeting === 'aim' || def.targeting === 'cone')) cx.target = this.pick(caster, origin, cx.dir, Math.min(range, 40), def, 0.12);
     }
     return cx;
   }

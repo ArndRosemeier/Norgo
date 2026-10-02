@@ -312,17 +312,20 @@ export class OpRunner {
     if (cx.target && cx.target !== cx.caster) dir = vnorm(vsub(chestOf(cx.target), origin));
     const hit = ctx.terrain.raycast(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], op.range);
     let length = hit ? hit.dist : op.range;
-    const end = vadd(origin, dir, length);
+    // Entities are tested a little past the terrain impact: a creature standing partly in the
+    // ground right where the beam lands (small critters on slopes) must not be shielded by it.
+    const graze = hit ? Math.min(op.range, length + 0.6) : length;
+    const end = vadd(origin, dir, graze);
     // Entities along the ray (first one unless piercing).
     const hits: { e: ServerEntity; t: number }[] = [];
-    for (const e of ctx.entities.near(vadd(origin, dir, length / 2), length / 2 + 3)) {
+    for (const e of ctx.entities.near(vadd(origin, dir, graze / 2), graze / 2 + 3)) {
       if (e === cx.caster || !isCombatant(e)) continue;
       const { d, t } = segmentCapsuleDist(origin, end, e);
       if (d <= 0.35) hits.push({ e, t });
     }
     hits.sort((a, b) => a.t - b.t);
     const victims = op.pierce ? hits : hits.slice(0, 1);
-    if (!op.pierce && victims.length) length = Math.max(0.5, victims[0].t * length);
+    if (!op.pierce && victims.length) length = Math.max(0.5, Math.min(length, victims[0].t * graze));
     for (const { e } of victims) {
       if (op.damage) {
         const type = op.type ?? 'force';

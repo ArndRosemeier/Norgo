@@ -238,7 +238,7 @@ export class SettlementRenderer implements ClientModule {
         // Hysteresis: keep the current level a bit longer.
         const hyst = t.built ? 25 : 0;
         t.level = d < NEAR + hyst ? 2 : d < mid + hyst ? 1 : 0;
-        if (t.level !== t.built || (t.level === 2 && !t.colliders)) {
+        if (t.level !== t.built || (t.level >= 1 && !t.colliders)) {
           if (t.level === 0) this.disposeTile(p, t);
           else this.queue.push({ place: p, tile: t, d, job: 'tile' });
         }
@@ -373,9 +373,11 @@ export class SettlementRenderer implements ClientModule {
       }
       t.built = 1;
     }
-    // Colliders.
-    if (want === 2 && !t.colliders) this.addColliders(t);
-    else if (want < 2 && t.colliders) this.removeColliders(t);
+    // Colliders: registered as soon as the exterior exists (mid range), not only with the
+    // interior mesh at near range — otherwise a player arriving before the near build
+    // (teleport, busy build queue) fell through floors onto the terrain beneath.
+    if (want >= 1 && !t.colliders) this.addColliders(t);
+    else if (want < 1 && t.colliders) this.removeColliders(t);
   }
 
   private makeSpecial(t: Tile, v: UnitView, pc: Piece, i: number) {
