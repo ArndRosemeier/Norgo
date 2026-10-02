@@ -19,6 +19,22 @@ export interface HitchEntry {
   layout: number;
   /** Game frame breakdown of the slowest recent frame (if the freeze was inside a frame). */
   frame?: string;
+  /**
+   * For late frames (`kind: 'gap'`): what changed in the frames just before — new shader
+   * programs, added geometries / textures / views, queued work. Freezes where scripts ran
+   * little are GPU-side; these deltas show what the GPU was handed.
+   */
+  kind?: 'loaf' | 'gap';
+  before?: { programs: string[]; geometries: number; textures: number; views: number; queued: number; calls: number };
+}
+
+/** Per-frame counters the game reports (renderer.info memory, views, work queue). */
+export interface FrameCounters {
+  geometries: number;
+  textures: number;
+  views: number;
+  queued: number;
+  calls: number;
 }
 
 const JOURNAL_KEY = 'norgo.hitches';
@@ -127,10 +143,42 @@ export class FrameProfiler {
   beginFrame() {
     this.t0 = performance.now();
     if (this.lastBegin && this.t0 - this.lastBegin > 50 && !document.hidden) {
-      this.gaps.push({ t: +(this.t0 / 1000).toFixed(1), ms: Math.round(this.t0 - this.lastBegin) });
+      const ms = Math.round(this.t0 - this.lastBegin);
+      this.gaps.push({ t: +(this.t0 / 1000).toFixed(1), ms });
       if (this.gaps.length > 100) this.gaps.shift();
+      if (ms > 300 && this.counters.length > 1) {
+        const a = this.counters[0], b = this.counters[this.counters.length - 1];
+        this.journal.entries.push({
+          kind: 'gap',
+          t: +((this.lastBegin - this.sessionT0) / 1000).toFixed(2),
+          ms,
+          block: 0,
+          scripts: [],
+          layout: 0,
+          before: {
+            programs: this.recentPrograms.slice(-12),
+            geometries: b.geometries - a.geometries,
+            textures: b.textures - a.textures,
+            views: b.views - a.views,
+            queued: b.queued,
+            calls: b.calls,
+          },
+        });
+        if (this.journal.entries.length > 120) this.journal.entries.shift();
+        this.persist();
+      }
     }
     this.lastBegin = this.t0;
+  }
+
+  /** Last ~30 frames of counters and recently compiled programs (for 'gap' journal entries). */
+  private counters: FrameCounters[] = [];
+  private recentPrograms: string[] = [];
+
+  /** Report this frame's counters (cheap; called by the game loop after rendering). */
+  noteCounters(c: FrameCounters) {
+    this.counters.push(c);
+    if (this.counters.length > 30) this.counters.shift();
   }
 
   /** Start timing a named section (ends the previous one). */
@@ -153,7 +201,12 @@ export class FrameProfiler {
     for (const pr of programs) {
       if (this.knownPrograms.has(pr.cacheKey)) continue;
       this.knownPrograms.add(pr.cacheKey);
-      if (!first) this.compiled.push(pr.name || pr.cacheKey.split(',', 2).join(','));
+      if (!first) {
+        const name = pr.name || pr.cacheKey.split(',', 2).join(',');
+        this.compiled.push(name);
+        this.recentPrograms.push(name);
+        if (this.recentPrograms.length > 40) this.recentPrograms.shift();
+      }
     }
   }
 

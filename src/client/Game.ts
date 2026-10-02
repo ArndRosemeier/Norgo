@@ -41,6 +41,7 @@ import { FxSystem } from '../gameplay/client/FxSystem';
 import { AudioSystem } from '../audio/AudioSystem';
 import { UI, NewGameChoice } from '../ui/UI';
 import { appShell } from './appShell';
+import { frameWork } from '../core/frameWork';
 import { applyGraphicsSettings } from './graphics';
 import type { ItemInstance } from '../items/types';
 
@@ -617,9 +618,14 @@ export class Game implements ClientContext {
       (this.ui as unknown as { setDebugInfo?(l: string[]): void }).setDebugInfo?.(lines);
     }
 
+    // Frame-budgeted main-thread work (character finishing etc., see core/frameWork).
+    this.prof.mark('work');
+    frameWork.pump();
+
     this.prof.mark('render');
     this.core.render();
     this.prof.notePrograms(this.core.renderer.info.programs as { name: string; cacheKey: string }[] | undefined);
+    { const ri = this.core.renderer.info; this.prof.noteCounters({ geometries: ri.memory.geometries, textures: ri.memory.textures, views: this.views.size, queued: frameWork.pending, calls: ri.render.calls }); }
   }
 
   private updateViews(dt: number, serverNow: number) {

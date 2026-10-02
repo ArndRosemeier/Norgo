@@ -4,6 +4,7 @@
  * EquipmentRig, LOD switching by camera distance and update throttling for
  * distant characters. Used by HumanoidViews, HumanoidPreview and the sandbox.
  */
+import { frameWork } from '../../core/frameWork';
 import * as THREE from 'three';
 import type { HumanoidAppearance } from '../types';
 import type { AnimState, Vec3 } from '../../shared/types';
@@ -79,6 +80,18 @@ export class HumanoidRig {
     const svc = BodyService.get();
     const geo = await svc.geometry(this.app, this.opts.priority ?? 0);
     if (this.disposed) return;
+    // The expensive main-thread part runs in a frame-budgeted slot (see core/frameWork).
+    await new Promise<void>((done) => frameWork.run(() => {
+      try {
+        this.finishBuild(geo);
+      } finally {
+        done();
+      }
+    }, this.opts.priority ?? 1));
+  }
+
+  private finishBuild(geo: Awaited<ReturnType<BodyService['geometry']>>) {
+    if (this.disposed) return;
     const ch = new Character(geo, this.app, { castShadow: this.opts.castShadow });
     this.char = ch;
     this.animator = new Animator(ch);
@@ -107,10 +120,18 @@ export class HumanoidRig {
       return;
     }
     this.geoKey = key;
-    const old = this.char, oldEq = this.equipment;
     const svc = BodyService.get();
     const geo = await svc.geometry(app, 0);
     if (this.disposed || this.geoKey !== key) return;
+    // Finishing a character (materials, skeleton, clothing) is the expensive main-thread
+    // part: run it in a frame-budgeted slot, so bodies arriving together don't freeze a frame.
+    frameWork.run(() => this.finish(geo, app, key), this.opts.priority ?? 1);
+  }
+
+  private finish(geo: Awaited<ReturnType<BodyService['geometry']>>, app: HumanoidAppearance, key: string) {
+    if (this.disposed || this.geoKey !== key) return;
+    const old = this.char, oldEq = this.equipment;
+    const svc = BodyService.get();
     const ch = new Character(geo, app, { castShadow: this.opts.castShadow });
     oldEq?.dispose();
     old?.dispose();
