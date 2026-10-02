@@ -70,7 +70,16 @@ export class LightManager {
           pos.x += dx * push;
           pos.z += dz * push;
         }
-      } else pos.set(e.snap.pos[0], e.snap.pos[1] + (held ? 1.4 : 0.5), e.snap.pos[2]);
+      } else if (e.snap.kind === 'player' || e.snap.kind === 'npc' || e.snap.kind === 'creature') {
+        // A glow carried by a character (light buffs, halos): shine from above the head, not
+        // from inside the body — that lit the character instead of the area around it.
+        pos.set(e.snap.pos[0], e.snap.pos[1] + (e.view?.headHeight ?? 1.8) + 0.7, e.snap.pos[2]);
+      } else if (e.snap.kind === 'item') {
+        pos.set(e.snap.pos[0], e.snap.pos[1] + (held ? 1.4 : 0.5), e.snap.pos[2]);
+      } else {
+        // Zones, projectiles, orbs: the light sits exactly where the effect is.
+        pos.set(e.snap.pos[0], e.snap.pos[1], e.snap.pos[2]);
+      }
       const d = tmp.copy(pos).sub(camPos).lengthSq();
       cands.push({ d, pos, l, torch: !!held });
     }

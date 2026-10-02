@@ -21,6 +21,8 @@ export const EFFECTS: EffectDef[] = [
   E('slow', 'Slowed', 'debuff', '«', 'Moving slower.', { mods: { moveSpeed: -0.3, attackSpeed: -0.15 }, movement: true, fx: 'slow', stack: 'max', preventedBy: ['unstoppable'] }),
   E('root', 'Rooted', 'debuff', '⚓', 'Cannot move, but can still fight and cast.', { movement: true, fx: 'roots', preventedBy: ['unstoppable'] }),
   E('stun', 'Stunned', 'debuff', '✷', 'Cannot move or act.', { movement: true, incapacitate: true, fx: 'stun', preventedBy: ['unstoppable'] }),
+  // Marker for a following light orb (the orb itself is a zone): shows it with its countdown.
+  E('light_orb', 'Light Orb', 'buff', '💡', 'A floating orb of light follows you and lights your way.', {}),
   E('featherfall', 'Featherfall', 'buff', '🪶', 'Falling gently; no fall damage.', { movement: true, gravityMul: 0.35, flat: { fallResist: 1 }, fx: 'feather' }),
   E('levitate', 'Levitating', 'buff', '☁', 'Floating above the ground.', { movement: true, gravityMul: 0.05, flags: EntFlag.Levitating, flat: { fallResist: 1 }, fx: 'levitate' }),
   E('waterwalk', 'Waterwalking', 'buff', '≈', 'Water bears your weight.', { movement: true, fx: 'frostfeet' }),

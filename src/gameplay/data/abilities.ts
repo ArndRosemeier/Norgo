@@ -480,7 +480,7 @@ export const ABILITIES: AbilityDef[] = [
   // =================================================================== LUMINISM
   A('light_orb', 'Light Orb', 'luminism', 'self', {
     icon: '💡', description: 'Conjure a floating orb of light that follows you (lasts two minutes).', cost: { mana: 8 }, cooldown: 3, anim: 'cast_self', role: 'utility', radius: 14, tags: ['light'],
-    ops: [{ op: 'zone', kind: 'light_orb', radius: 0.4, duration: 120, at: 'self', follow: true, light: [1, 0.92, 0.75], lightIntensity: 6, max: 1 }],
+    ops: [{ op: 'zone', kind: 'light_orb', radius: 0.4, duration: 120, at: 'self', follow: true, light: [1, 0.92, 0.75], lightIntensity: 1.2, lightRadius: 16, max: 1 }],
   }),
   A('sunlance', 'Sunlance', 'luminism', 'aim', {
     icon: '☀', description: 'A lance of concentrated sunlight. Exposes hidden foes.', cost: { mana: 14 }, cooldown: 2, castTime: 0.35, range: 35, tags: ['light'],

@@ -19,6 +19,7 @@ import type { EntityId, Vec3 } from '../../shared/types';
 import { EntFlag } from '../../shared/types';
 import type { AbilityOp } from '../types';
 import type { GameplaySystem } from './GameplaySystem';
+import { effectDef } from '../data/catalog';
 import type { CastCtx } from './abilities';
 import { dirYaw, hnorm, isCombatant, vcopy, vsub, yawDir } from './util';
 
@@ -81,7 +82,7 @@ export class ZoneSim {
     e.faction = caster.faction;
     e.tags.add('zone').add('immovable').add('owner:' + caster.id);
     if (op.hidden) e.flags |= EntFlag.Invisible;
-    if (op.light) e.light = { color: op.light, intensity: op.lightIntensity ?? 4, radius: Math.max(8, op.radius * 2.5 + (op.length ?? 0)) };
+    if (op.light) e.light = { color: op.light, intensity: op.lightIntensity ?? 4, radius: op.lightRadius ?? Math.max(8, op.radius * 2.5 + (op.length ?? 0)) };
     ctx.spawn(e);
     const now = ctx.time.now;
     const z: Zone = {
@@ -89,6 +90,8 @@ export class ZoneSim {
       until: now + dur, next: now + 0.05, armedAt: now + 1, orbit: g.rng.float() * Math.PI * 2,
     };
     this.zones.set(e.id, z);
+    // Companion zones that follow a player (light orb) also show as a buff with a countdown.
+    if (op.follow && caster.kind === 'player' && effectDef(op.kind)) g.effects.apply(caster, op.kind, 1, dur, caster);
   }
 
   /** Is an entity inside a zone shape? */
@@ -116,9 +119,10 @@ export class ZoneSim {
           continue;
         }
         if (z.kind === 'light_orb') {
-          // Bob and circle above the caster's shoulder.
+          // Bob and circle high above and away from the caster, like a small lamp: close to the
+          // head it lit the caster more than the surroundings.
           z.orbit += dt * 0.9;
-          z.pos = [caster.pos[0] + Math.cos(z.orbit) * 0.7, caster.pos[1] + caster.height * caster.scale + 0.35 + Math.sin(now * 2.1) * 0.12, caster.pos[2] + Math.sin(z.orbit) * 0.7];
+          z.pos = [caster.pos[0] + Math.cos(z.orbit) * 1.1, caster.pos[1] + caster.height * caster.scale + 0.8 + Math.sin(now * 2.1) * 0.12, caster.pos[2] + Math.sin(z.orbit) * 1.1];
         } else z.pos = vcopy(caster.pos);
         z.e.pos = z.pos;
         z.e.vel = vcopy(caster.vel);
@@ -166,6 +170,10 @@ export class ZoneSim {
   remove(z: Zone, fade: boolean) {
     if (!this.zones.has(z.e.id)) return;
     this.zones.delete(z.e.id);
+    if (z.op.follow) {
+      const caster = this.g.ctx.entities.get(z.caster);
+      if (caster?.effects.some((x) => x.id === z.kind)) this.g.effects.remove(caster, z.kind);
+    }
     if (fade) this.g.ctx.broadcast({ type: 'fx', fx: 'zone_end:' + z.kind, pos: vcopy(z.pos), radius: z.radius }, z.pos);
     this.g.ctx.despawn(z.e.id);
   }

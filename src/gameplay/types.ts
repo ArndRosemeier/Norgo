@@ -92,7 +92,7 @@ export type AbilityOp =
   /** Persistent area ("effect" entity) that ticks recipe steps at its centre or triggers once (traps). */
   | {
       op: 'zone'; kind: string; radius: number; duration: number; at?: OpAnchor; tick?: number; ops?: AbilityOp[]; trigger?: boolean; light?: [number, number, number];
-      lightIntensity?: number; gravity?: number; follow?: boolean; length?: number; hidden?: boolean; max?: number;
+      lightIntensity?: number; /** Light reach (m); default from the zone size. */ lightRadius?: number; gravity?: number; follow?: boolean; length?: number; hidden?: boolean; max?: number;
     }
   /** Temporary gravity field (broadcast to clients and applied to server entities). */
   | { op: 'gravity'; radius: number; factor: number; duration: number; at?: OpAnchor }

@@ -340,10 +340,18 @@ export class Hotbar {
 
 // ------------------------------------------------------------------ effects
 
+/**
+ * Active buffs and afflictions, top right under the minimap: icon with a radial
+ * countdown sweep and the time left (blinking in the last seconds), tooltip on hover
+ * or long-press. Gaining or losing an effect is also announced in the feed, so a
+ * running-out Featherfall is noticed without watching the icons.
+ */
 export class EffectsBar {
   readonly el = h('div', { class: 'n-effects n-scaled' });
-  private items = new Map<string, { el: HTMLElement; time: HTMLElement; last: string }>();
+  private items = new Map<string, { el: HTMLElement; time: HTMLElement; last: string; total: number; harmful: boolean }>();
   private sig = '';
+  /** The first refresh after loading restores effects silently. */
+  private primed = false;
 
   constructor(private host: UiHost) {}
 
@@ -353,25 +361,36 @@ export class EffectsBar {
     if (sig === this.sig) return;
     this.sig = sig;
     const keep = new Set<string>();
+    const now = this.host.serverNow();
     for (const e of effs) {
       const key = e.id;
       keep.add(key);
-      if (this.items.has(key)) continue;
+      const known = this.items.get(key);
+      if (known) {
+        // Refreshed / re-cast: restart the sweep from the new duration.
+        const left = e.until - now;
+        if (Number.isFinite(left) && left > known.total) known.total = left;
+        continue;
+      }
       const harmful = isHarmfulEffect(e.id);
       const time = h('span', { class: 'n-eff-time' });
-      const el = h('div', { class: `n-eff n-interactive ${harmful ? 'bad' : 'good'}` }, h('img', { attrs: { src: effectIcon(e.id, harmful), alt: '' } }), time);
+      const el = h('div', { class: `n-eff n-interactive ${harmful ? 'bad' : 'good'}` }, h('img', { attrs: { src: effectIcon(e.id, harmful), alt: '' } }), h('span', { class: 'n-eff-sweep' }), time);
+      if (this.primed && !e.id.startsWith('_')) this.host.notify(harmful ? `Afflicted: ${titleize(e.id)}` : titleize(e.id), harmful ? 'bad' : 'good', effectIcon(e.id, harmful));
       tooltip.bind(el, () => {
         const cur = this.host.ctx.state.player.effects.find((x) => x.id === key);
         return cur ? effectCard(cur, this.host.serverNow(), harmful) : null;
       });
-      this.items.set(key, { el, time, last: '' });
+      const left = e.until - now;
+      this.items.set(key, { el, time, last: '', total: Number.isFinite(left) ? Math.max(1, left) : Infinity, harmful });
       this.el.append(el);
     }
     for (const [k, v] of this.items)
       if (!keep.has(k)) {
         v.el.remove();
         this.items.delete(k);
+        if (this.primed && !k.startsWith('_')) this.host.notify(v.harmful ? `${titleize(k)} has passed` : `${titleize(k)} wore off`, v.harmful ? 'good' : 'info');
       }
+    this.primed = true;
   }
 
   update() {
@@ -389,6 +408,9 @@ export class EffectsBar {
         it.last = label;
         it.el.classList.toggle('expiring', Number.isFinite(left) && left < 5);
       }
+      // Radial sweep: share of the duration already used up.
+      const used = Number.isFinite(left) && Number.isFinite(it.total) ? Math.min(1, Math.max(0, 1 - left / it.total)) : 0;
+      it.el.style.setProperty('--used', used.toFixed(3));
     }
   }
 }
