@@ -181,6 +181,17 @@ export class TerrainStreamer {
         if (c.islands > 0.05) extra = Math.max(extra, 420);
         if (c.pTop > -1e8) extra = Math.max(extra, c.pTop - c.height + 20);
       }
+    // The cheap columns skip settlement shaping, but a city levels ground up to 1.9 × its
+    // radius to its plateau — cut into a hillside, that is 100 m+ below the natural surface,
+    // and the town's chunks were culled as "underground" (a hole in the ground). Sites are
+    // cached per 720 m cell, so one lookup per node is cheap.
+    for (const s of this.gen.sites.sitesNear(ox + size / 2, oz + size / 2, size / 2)) {
+      const reach = s.radius * 1.9;
+      const dx = Math.max(ox - s.x, 0, s.x - (ox + size)), dz = Math.max(oz - s.z, 0, s.z - (oz + size));
+      if (dx * dx + dz * dz > reach * reach) continue;
+      minH = Math.min(minH, s.plateau - 3);
+      maxH = Math.max(maxH, s.plateau + 3);
+    }
     if (oy > maxH + extra) return false;
     // Deep underground the surface world is invisible (except through shafts nearby).
     if (this.camDepth > 50 && lod >= 2 && oy > this.camPos.y + 140) return false;
