@@ -24,7 +24,7 @@ export interface HitchEntry {
    * programs, added geometries / textures / views, queued work. Freezes where scripts ran
    * little are GPU-side; these deltas show what the GPU was handed.
    */
-  kind?: 'loaf' | 'gap';
+  kind?: 'loaf' | 'gap' | 'shader';
   before?: { programs: string[]; geometries: number; textures: number; views: number; queued: number; calls: number };
 }
 
@@ -201,6 +201,20 @@ export class FrameProfiler {
   /** Last ~30 frames of counters and recently compiled programs (for 'gap' journal entries). */
   private counters: FrameCounters[] = [];
   private recentPrograms: string[] = [];
+
+  /** A background shader compile took over a second (see ShaderGate.onSlowCompile). */
+  noteSlowCompile(ms: number, timedOut: boolean, materials: string[]) {
+    this.journal.entries.push({
+      kind: 'shader',
+      t: +((performance.now() - this.sessionT0) / 1000).toFixed(2),
+      ms: Math.round(ms),
+      block: 0,
+      scripts: [`${timedOut ? 'TIMED OUT ' : ''}${materials.join(', ')}`],
+      layout: 0,
+    });
+    if (this.journal.entries.length > 120) this.journal.entries.shift();
+    this.persist();
+  }
 
   /** Report this frame's counters (cheap; called by the game loop after rendering). */
   noteCounters(c: FrameCounters) {

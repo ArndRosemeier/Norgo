@@ -152,6 +152,7 @@ export class Game implements ClientContext {
 
   async start(onProgress: (stage: string, frac: number) => void) {
     this.prof.startSession(`${this.seed >>> 0}`);
+    this.core.shaders.onSlowCompile = (ms, timedOut, names) => this.prof.noteSlowCompile(ms, timedOut, names);
     (window as unknown as { norgoBoot: Game }).norgoBoot = this;
     onProgress('Weaving the world palette', 0.05);
     const texData = await synthesizeInWorker(this.seed);

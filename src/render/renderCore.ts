@@ -220,7 +220,21 @@ export class ShaderGate {
    * can, otherwise paced through `pump()` once the gate is live (during the loading screen
    * everything compiles at once — nothing is on screen to stall).
    */
-  compile(obj: THREE.Object3D, timeoutMs = 3000): Promise<void> {
+  /**
+   * Reports compiles slower than 1 s (diagnostics; the game forwards them to the hitch
+   * journal): duration, whether the safety timeout fired, and the material names.
+   */
+  onSlowCompile: ((ms: number, timedOut: boolean, materials: string[]) => void) | null = null;
+
+  /**
+   * Safety timeout for parked objects on the parallel path. Revealing an object before its
+   * programs are ready makes the next draw wait for the driver synchronously — on ANGLE/D3D
+   * complex shaders can take several seconds (4-8 s freezes were seen with a 3 s timeout).
+   * Appearing late is always better than freezing.
+   */
+  static readonly PARALLEL_TIMEOUT_MS = 30000;
+
+  compile(obj: THREE.Object3D, timeoutMs = this.paced ? 3000 : ShaderGate.PARALLEL_TIMEOUT_MS): Promise<void> {
     if (!this.enabled) return this.compileNow(obj, timeoutMs);
     if (!this.paced) {
       // Parallel compiles still run on the driver's threads: a burst (a new settlement view plus
@@ -327,11 +341,22 @@ export class ShaderGate {
       for (const m of main) link(m);
       for (const proxy of proxies.children) for (const m of materialsOf(proxy as Drawable)) link(m);
     }
-    const done = Promise.all(jobs).then(() => undefined, () => undefined);
+    const started = performance.now();
+    let finished = false;
+    const done = Promise.all(jobs).then(() => {
+      finished = true;
+    }, () => {
+      finished = true;
+    });
     // Marked ready even after a timeout or error, so nothing is parked over and over.
     return Promise.race([done, new Promise<void>((res) => setTimeout(res, timeoutMs))]).then(() => {
       for (const m of main) this.readyMain.add(m);
       for (const m of depth) this.readyDepth.add(m);
+      const ms = performance.now() - started;
+      if (ms > 1000 && this.onSlowCompile) {
+        const names = [...new Set(main.map((m) => m.name || m.type))].slice(0, 8);
+        this.onSlowCompile(ms, !finished, names);
+      }
     });
   }
 
