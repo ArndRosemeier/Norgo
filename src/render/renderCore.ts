@@ -599,7 +599,56 @@ export class RenderCore {
       this.shaders.pump();
       this.shaders.scan();
     }
+    // Count the whole frame (scene + effect passes): with autoReset, renderer.info only held
+    // the final output pass (~1 draw call).
+    this.renderer.info.autoReset = false;
+    this.renderer.info.reset();
+    const q = this.gpuTimerBegin();
     this.renderer.render(this.scene, this.camera);
+    this.gpuTimerEnd(q);
+  }
+
+  /**
+   * GPU time per frame (EXT_disjoint_timer_query_webgl2, when available). Frames whose GPU
+   * work exceeds 150 ms are reported (diagnostics → hitch journal) with draw calls and
+   * triangles, telling GPU overload apart from driver/compositor stalls.
+   */
+  onGpuSpike: ((gpuMs: number, calls: number, triangles: number) => void) | null = null;
+  private gpuExt: { TIME_ELAPSED_EXT: number; GPU_DISJOINT_EXT: number } | null | undefined;
+  private gpuPending: { q: WebGLQuery; calls: number; tris: number }[] = [];
+
+  private gpuTimerBegin(): WebGLQuery | null {
+    if (!this.onGpuSpike) return null;
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    if (this.gpuExt === undefined) this.gpuExt = gl.getExtension('EXT_disjoint_timer_query_webgl2') as typeof this.gpuExt;
+    if (!this.gpuExt || this.gpuPending.length >= 6) return null;
+    const q = gl.createQuery();
+    if (!q) return null;
+    gl.beginQuery(this.gpuExt.TIME_ELAPSED_EXT, q);
+    return q;
+  }
+
+  private gpuTimerEnd(q: WebGLQuery | null) {
+    const ext = this.gpuExt;
+    if (!ext) return;
+    const gl = this.renderer.getContext() as WebGL2RenderingContext;
+    const info = this.renderer.info.render;
+    if (q) {
+      gl.endQuery(ext.TIME_ELAPSED_EXT);
+      this.gpuPending.push({ q, calls: info.calls, tris: info.triangles });
+    }
+    const disjoint = gl.getParameter(ext.GPU_DISJOINT_EXT) as boolean;
+    for (let i = 0; i < this.gpuPending.length; ) {
+      const p = this.gpuPending[i];
+      if (!gl.getQueryParameter(p.q, gl.QUERY_RESULT_AVAILABLE)) {
+        i++;
+        continue;
+      }
+      const ms = (gl.getQueryParameter(p.q, gl.QUERY_RESULT) as number) / 1e6;
+      gl.deleteQuery(p.q);
+      this.gpuPending.splice(i, 1);
+      if (!disjoint && ms > 150) this.onGpuSpike?.(ms, p.calls, p.tris);
+    }
   }
 
   /**

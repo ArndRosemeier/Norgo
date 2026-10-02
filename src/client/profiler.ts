@@ -24,7 +24,7 @@ export interface HitchEntry {
    * programs, added geometries / textures / views, queued work. Freezes where scripts ran
    * little are GPU-side; these deltas show what the GPU was handed.
    */
-  kind?: 'loaf' | 'gap' | 'shader';
+  kind?: 'loaf' | 'gap' | 'shader' | 'gpu' | 'work';
   before?: { programs: string[]; geometries: number; textures: number; views: number; queued: number; calls: number };
 }
 
@@ -201,6 +201,27 @@ export class FrameProfiler {
   /** Last ~30 frames of counters and recently compiled programs (for 'gap' journal entries). */
   private counters: FrameCounters[] = [];
   private recentPrograms: string[] = [];
+
+  /** A single frame-work job took over 150 ms (see core/frameWork onSlowJob). */
+  noteSlowJob(label: string, ms: number) {
+    this.journal.entries.push({ kind: 'work', t: +((performance.now() - this.sessionT0) / 1000).toFixed(2), ms: Math.round(ms), block: 0, scripts: [label], layout: 0 });
+    if (this.journal.entries.length > 120) this.journal.entries.shift();
+    this.persist();
+  }
+
+  /** A frame's GPU work took over 150 ms (see RenderCore.onGpuSpike). */
+  noteGpuSpike(ms: number, calls: number, triangles: number) {
+    this.journal.entries.push({
+      kind: 'gpu',
+      t: +((performance.now() - this.sessionT0) / 1000).toFixed(2),
+      ms: Math.round(ms),
+      block: 0,
+      scripts: [`${calls} draw calls, ${(triangles / 1e6).toFixed(2)} M triangles`],
+      layout: 0,
+    });
+    if (this.journal.entries.length > 120) this.journal.entries.shift();
+    this.persist();
+  }
 
   /** A background shader compile took over a second (see ShaderGate.onSlowCompile). */
   noteSlowCompile(ms: number, timedOut: boolean, materials: string[]) {

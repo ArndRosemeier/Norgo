@@ -91,7 +91,7 @@ export class HumanoidRig {
       } finally {
         done();
       }
-    }, this.opts.priority ?? 1));
+    }, this.opts.priority ?? 1, 'character'));
   }
 
   private finishBuild(geo: Awaited<ReturnType<BodyService['geometry']>>) {
@@ -116,11 +116,11 @@ export class HumanoidRig {
     if (this.opts.fixedLod !== undefined) ch.setLod(this.opts.fixedLod);
     T.builds++;
     const prio = this.opts.priority ?? 1;
-    this.equipment.set(this.pendingEq, (job) => frameWork.run(() => {
+    this.equipment.set(this.pendingEq, (job, label) => frameWork.run(() => {
       const t0 = performance.now();
       job();
       T.equipment += performance.now() - t0;
-    }, prio), () => {
+    }, prio, label), () => {
       if (this.disposed || this.char !== ch) return;
       this.equipment?.setSkyVis(this.skyVis);
       ch.object.visible = true;
@@ -147,7 +147,7 @@ export class HumanoidRig {
     if (this.disposed || this.geoKey !== key) return;
     // Finishing a character (materials, skeleton, clothing) is the expensive main-thread
     // part: run it in a frame-budgeted slot, so bodies arriving together don't freeze a frame.
-    frameWork.run(() => this.finish(geo, app, key), this.opts.priority ?? 1);
+    frameWork.run(() => this.finish(geo, app, key), this.opts.priority ?? 1, 'character (new look)');
   }
 
   private finish(geo: Awaited<ReturnType<BodyService['geometry']>>, app: HumanoidAppearance, key: string) {

@@ -190,7 +190,7 @@ export class EquipmentRig {
    * piece) and `done` runs after the last one; without, everything is built immediately.
    * A newer `set` makes jobs still pending from an older one skip themselves.
    */
-  set(eq: EquipmentVisuals | undefined, schedule?: (job: () => void) => void, done?: () => void) {
+  set(eq: EquipmentVisuals | undefined, schedule?: (job: () => void, label: string) => void, done?: () => void) {
     const key = eq ? Object.entries(eq).filter(([, v]) => v).map(([k, v]) => `${k}:${v!.defId}:${v!.visual.seed}`).sort().join('|') : '';
     if (key === this.key) {
       done?.();
@@ -198,11 +198,11 @@ export class EquipmentRig {
     }
     this.key = key;
     const gen = ++this.gen;
-    const run = (job: () => void) => {
+    const run = (job: () => void, label = 'equipment') => {
       const guarded = () => {
         if (gen === this.gen) job();
       };
-      if (schedule) schedule(guarded);
+      if (schedule) schedule(guarded, label);
       else guarded();
     };
     this.clear();
@@ -215,7 +215,7 @@ export class EquipmentRig {
     for (const [slot, item] of Object.entries(eq) as [EquipSlot, NonNullable<EquipmentVisuals[EquipSlot]>][]) {
       if (!item) continue;
       if (slot === 'mainhand' || slot === 'offhand') {
-        run(() => { const t0 = performance.now(); this.addHeld(slot, item.defId, item.visual); EQ_STATS.held += performance.now() - t0; });
+        run(() => { const t0 = performance.now(); this.addHeld(slot, item.defId, item.visual); EQ_STATS.held += performance.now() - t0; }, `held ${item.defId}`);
         continue;
       }
       let spec: WearableSpec | null = null;
@@ -230,7 +230,7 @@ export class EquipmentRig {
       for (const r of spec.hideRegions ?? []) hiddenRegions.add(r);
       for (const l of spec.layers) {
         if (l.kind === 'shell') layers.push({ layer: l, seed: item.visual.seed });
-        else run(() => { const t0 = performance.now(); this.addRigid(l, slot, fit); EQ_STATS.rigid += performance.now() - t0; });
+        else run(() => { const t0 = performance.now(); this.addRigid(l, slot, fit); EQ_STATS.rigid += performance.now() - t0; }, `rigid ${item.defId}`);
       }
     }
     // Modest default underclothes where nothing covers hips (and chest for women).
@@ -245,7 +245,7 @@ export class EquipmentRig {
     let order = 0;
     for (const { layer, seed } of layers) {
       const o = order++;
-      run(() => { const t0 = performance.now(); this.addShell(layer, seed, covered, o); EQ_STATS.shells += performance.now() - t0; EQ_STATS.shellCount++; });
+      run(() => { const t0 = performance.now(); this.addShell(layer, seed, covered, o); EQ_STATS.shells += performance.now() - t0; EQ_STATS.shellCount++; }, `shell ${layer.regions.map((r) => r.region).join('+')}`);
     }
     run(() => {
       this.applyHidden([...hiddenRegions], hideHair, hideBeard, covered);

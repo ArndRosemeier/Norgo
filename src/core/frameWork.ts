@@ -19,6 +19,7 @@ interface Job {
   run: () => void;
   priority: number;
   seq: number;
+  label: string;
 }
 
 /** Milliseconds of queued work per frame, by device class. */
@@ -32,9 +33,12 @@ class FrameWork {
   /** Jobs run and time spent (diagnostics). */
   readonly stats = { jobs: 0, ms: 0, maxQueue: 0 };
 
+  /** Called for a single job that took over 150 ms (diagnostics → hitch journal). */
+  onSlowJob: ((label: string, ms: number) => void) | null = null;
+
   /** Queue work; lower priority values run sooner (ties: first come, first served). */
-  run(fn: () => void, priority = 0): void {
-    this.queue.push({ run: fn, priority, seq: this.seq++ });
+  run(fn: () => void, priority = 0, label = 'job'): void {
+    this.queue.push({ run: fn, priority, seq: this.seq++, label });
     this.stats.maxQueue = Math.max(this.stats.maxQueue, this.queue.length);
     this.armFallback();
   }
@@ -53,11 +57,14 @@ class FrameWork {
     while (this.queue.length && (n === 0 || performance.now() - t0 < budgetMs)) {
       const job = this.queue.shift()!;
       n++;
+      const tj = performance.now();
       try {
         job.run();
       } catch (e) {
         console.error('[frameWork] job failed', e);
       }
+      const dj = performance.now() - tj;
+      if (dj > 150) this.onSlowJob?.(job.label, dj);
     }
     this.stats.jobs += n;
     this.stats.ms += performance.now() - t0;
