@@ -35,6 +35,11 @@ export interface CastCtx {
   charge: number;
   /** Set when steps run inside a zone (area radius 0 = the zone's own shape). */
   zone?: ZoneShape;
+  /**
+   * Ranged single-target attack that was checked at cast time (in range, in sight): its
+   * projectiles fly to this target and its beams land on it — no ballistics, no misses.
+   */
+  guaranteed?: ServerEntity;
 }
 
 interface PendingCast {
@@ -45,6 +50,9 @@ interface PendingCast {
 export type UseResult = { ok: true } | { ok: false; reason: string };
 
 const fail = (reason: string): { ok: false; reason: string } => ({ ok: false, reason });
+
+/** Aimed abilities that hit one creature at range (projectiles or beams): certain hits, see CastCtx.guaranteed. */
+const rangedSingle = (def: AbilityDef) => def.targeting === 'aim' && !!def.ops?.some((o) => o.op === 'projectile' || o.op === 'beam');
 
 export class AbilityRunner {
   private casts = new Map<EntityId, PendingCast>();
@@ -251,6 +259,18 @@ export class AbilityRunner {
         break;
       }
       default:
+        // Ranged single-target attacks with a tab target: decided once, here. If it cannot hit,
+        // a message and nothing is spent; otherwise the hit is certain (see CastCtx.guaranteed).
+        if (rangedSingle(def) && use.lock && use.target !== undefined) {
+          const t = ctx.entities.get(use.target);
+          const why = t ? this.g.melee.rangedBlocker(caster, t, range + 0.5) : 'Target lost.';
+          if (why || !t) return fail(why ?? 'Target lost.');
+          cx.target = t;
+          cx.guaranteed = t;
+          cx.point = chestOf(t);
+          cx.dir = vnorm(vsub(cx.point, origin), dir);
+          break;
+        }
         cx.point = point;
         // Crosshair aim: the client's direction is the camera's, which sits behind and above
         // the shoulder; cast along it from the eye and the line runs parallel but offset —
@@ -262,6 +282,12 @@ export class AbilityRunner {
           cx.dir = vnorm(vsub(cx.point, origin), dir);
           cx.target = locked;
         } else if (!target && (def.targeting === 'aim' || def.targeting === 'cone')) cx.target = this.pick(caster, origin, cx.dir, Math.min(range, 40), def, 0.12);
+        // Crosshair on a creature that can be hit from here: the same certain hit as a tab target.
+        if (!locked && rangedSingle(def) && cx.target && cx.target !== caster && !this.g.melee.rangedBlocker(caster, cx.target, range + 0.5)) {
+          cx.guaranteed = cx.target;
+          cx.point = chestOf(cx.target);
+          cx.dir = vnorm(vsub(cx.point, origin), cx.dir);
+        }
     }
     return cx;
   }

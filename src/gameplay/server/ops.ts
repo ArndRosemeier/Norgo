@@ -310,8 +310,10 @@ export class OpRunner {
     const origin = eyeOf(cx.caster);
     let dir = cx.dir;
     if (cx.target && cx.target !== cx.caster) dir = vnorm(vsub(chestOf(cx.target), origin));
-    const hit = ctx.terrain.raycast(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], op.range);
-    let length = hit ? hit.dist : op.range;
+    // A checked ranged attack lands on its target (no terrain test; see CastCtx.guaranteed).
+    const sure = cx.guaranteed?.alive ? cx.guaranteed : undefined;
+    const hit = sure ? null : ctx.terrain.raycast(origin[0], origin[1], origin[2], dir[0], dir[1], dir[2], op.range);
+    let length = sure ? vlen(vsub(chestOf(sure), origin)) : hit ? hit.dist : op.range;
     // Entities are tested a little past the terrain impact: a creature standing partly in the
     // ground right where the beam lands (small critters on slopes) must not be shielded by it.
     const graze = hit ? Math.min(op.range, length + 0.6) : length;
@@ -324,7 +326,8 @@ export class OpRunner {
       if (d <= 0.35) hits.push({ e, t });
     }
     hits.sort((a, b) => a.t - b.t);
-    const victims = op.pierce ? hits : hits.slice(0, 1);
+    let victims = op.pierce ? hits : hits.slice(0, 1);
+    if (sure) victims = op.pierce ? [...hits.filter((x) => x.e !== sure), { e: sure, t: 1 }] : [{ e: sure, t: 1 }];
     if (!op.pierce && victims.length) length = Math.max(0.5, Math.min(length, victims[0].t * graze));
     for (const { e } of victims) {
       if (op.damage) {

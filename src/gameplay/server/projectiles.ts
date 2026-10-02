@@ -17,7 +17,7 @@ import type { GameplaySystem } from './GameplaySystem';
 import { solidMaterial } from './terrainOps';
 import type { CastCtx } from './abilities';
 import { effectiveGravity } from './zones';
-import { chestOf, dirYaw, isCombatant, masterOf, segmentCapsuleDist, vadd, vcopy, vdist, vlen, vnorm, vsub } from './util';
+import { chestOf, dirYaw, isCombatant, masterOf, segmentCapsuleDist, vadd, vcopy, vdist, vlen, vnorm, vscale, vsub } from './util';
 
 type ProjOp = Extract<AbilityOp, { op: 'projectile' }>;
 
@@ -32,6 +32,8 @@ interface Proj {
   pierce: number;
   hit: Set<EntityId>;
   homing?: ServerEntity;
+  /** Checked ranged attack: flies straight to this target and hits it (see CastCtx.guaranteed). */
+  sure?: ServerEntity;
   damage: number;
   type: DamageType;
   skill: string;
@@ -129,9 +131,13 @@ export class ProjectileSim {
       let homing: ServerEntity | undefined;
       const seeking = !!op.useWeapon && skill === 'archery' && g.melee.grantsOf(caster).has('ench.seeking_arrow');
       if (op.homing || seeking) homing = cx.target && cx.target !== caster && cx.target.alive ? cx.target : this.acquire(caster, origin, vnorm(vel), 30);
+      // The first projectile of a checked attack is certain to arrive; spread extras fly freely.
+      const sure = i === 0 && !op.volley && cx.guaranteed?.alive ? cx.guaranteed : undefined;
+      const life = op.life ?? (op.volley ? 4 : 5);
+      const reach = sure ? vlen(vsub(chestOf(sure), origin)) / Math.max(1, speed) + 1 : 0;
       this.list.set(e.id, {
-        e, cx, op, owner: caster, gk: op.gravity ?? 1, radius: e.radius, until: ctx.time.now + (op.life ?? (op.volley ? 4 : 5)), pierce: op.pierce ?? 0,
-        hit: new Set(), homing, damage, type, skill, basic, ammoDef, itemDrop: i === 0 ? opts.itemDrop : undefined,
+        e, cx, op, owner: caster, gk: op.gravity ?? 1, radius: e.radius, until: ctx.time.now + Math.max(life, reach), pierce: op.pierce ?? 0,
+        hit: new Set(), homing, sure, damage, type, skill, basic, ammoDef, itemDrop: i === 0 ? opts.itemDrop : undefined,
         reflected: false,
       });
     }
@@ -190,6 +196,30 @@ export class ProjectileSim {
         continue;
       }
       const speed = vlen(e.vel);
+      // Certain hit: straight to the target's chest, through anything in between.
+      if (p.sure) {
+        if (!p.sure.alive || !ctx.entities.get(p.sure.id)) p.sure = undefined;
+        else {
+          const aim = chestOf(p.sure);
+          const to = vsub(aim, e.pos);
+          const dist = vlen(to);
+          const fly = Math.max(speed, 8);
+          const step = fly * dt;
+          if (dist <= step + p.radius + p.sure.radius * p.sure.scale * 0.5) {
+            const target = p.sure;
+            p.sure = undefined;
+            if (this.hitEntity(p, target, aim)) continue;
+          } else {
+            const n = vscale(to, 1 / dist);
+            e.vel = vscale(n, fly);
+            e.pos = vadd(e.pos, n, step);
+            e.yaw = dirYaw(e.vel);
+            e.dirty = true;
+            ctx.entities.reindex(e);
+            continue;
+          }
+        }
+      }
       const travel = speed * dt;
       const steps = Math.max(1, Math.ceil(travel / 0.6));
       const h = dt / steps;

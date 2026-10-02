@@ -156,6 +156,28 @@ export class MeleeSim {
     return e;
   }
 
+  /**
+   * Can `caster` hit `target` with a ranged attack reaching `range`? `null` = yes (the hit is
+   * then certain); otherwise the reason shown to the player. Line of sight counts if the head,
+   * chest or upper body is visible from the caster's eye.
+   */
+  rangedBlocker(caster: ServerEntity, target: ServerEntity, range: number): string | null {
+    if (target === caster || !target.alive || !isCombatant(target) || (target.flags & EntFlag.Invisible) !== 0) return 'Target lost.';
+    const ctx = this.g.ctx;
+    const eye = eyeOf(caster);
+    const c = chestOf(target);
+    if (Math.hypot(c[0] - eye[0], c[1] - eye[1], c[2] - eye[2]) > range) return 'Out of range.';
+    const h = target.height * target.scale;
+    for (const y of [h * 0.9, c[1] - target.pos[1], h * 0.55]) {
+      const d: Vec3 = [target.pos[0] - eye[0], target.pos[1] + y - eye[1], target.pos[2] - eye[2]];
+      const dist = Math.hypot(d[0], d[1], d[2]);
+      if (dist < 0.5) return null;
+      const hit = ctx.terrain.raycast(eye[0], eye[1], eye[2], d[0] / dist, d[1] / dist, d[2] / dist, dist);
+      if (!hit || hit.dist >= dist - 0.4) return null;
+    }
+    return 'No line of sight.';
+  }
+
   attack(p: ServerEntity, msg: Extract<ClientMessage, { t: 'attack' }>) {
     const g = this.g, ctx = g.ctx;
     if (!p.alive) return;
@@ -164,6 +186,18 @@ export class MeleeSim {
     const r = g.runtime(p);
     if (now < r.nextAttackAt - 0.05) return;
     const w = this.weaponOf(p);
+    // Bows and throws at a tab target: decided before anything is spent. If the shot cannot
+    // hit, a message; otherwise it is certain to land (the projectile flies to the target).
+    let sure: ServerEntity | undefined;
+    if (w.ranged && msg.lock && msg.target !== undefined) {
+      const t = ctx.entities.get(msg.target);
+      const why = t ? this.rangedBlocker(p, t, LOCK_RANGE) : 'Target lost.';
+      if (why || !t) {
+        g.notify(p, why ?? 'Target lost.', 'warn');
+        return;
+      }
+      sure = t;
+    }
     const heavy = !!msg.heavy;
     const speed = Math.max(0.3, w.speed * (1 + (p.stats?.attackSpeed ?? 0)));
     const dur = (heavy ? 0.95 : 0.6) / speed;
@@ -177,7 +211,7 @@ export class MeleeSim {
     let dir = isVec3(msg.dir) ? vnorm(msg.dir, yawDir(p.yaw)) : yawDir(p.yaw);
     // Tab target: shots fly at it from any distance; swings turn toward it once it is in reach.
     const reach = w.reach + (p.scale - 1) * 0.8;
-    const lock = msg.lock ? this.lockedTarget(p, msg.target, w.ranged ? LOCK_RANGE : reach + 3) : undefined;
+    const lock = sure ?? (msg.lock ? this.lockedTarget(p, msg.target, w.ranged ? LOCK_RANGE : reach + 3) : undefined);
     if (lock) {
       const to = vsub(lock.pos, p.pos);
       const gap = Math.hypot(to[0], to[2]) - lock.radius * lock.scale;
@@ -211,9 +245,10 @@ export class MeleeSim {
       caster: p, def: basicDef(w.skill), use: { ability: 'attack', dir }, origin: eyeOf(p), dir, point: eyeOf(p), level: 0, power: 1, charge: heavy ? 1 : 0.7,
     };
     if (lock) {
-      // The projectile system leads the locked target and compensates for drop.
+      // Checked in attack(): the shot flies to the target and lands (see CastCtx.guaranteed).
       cx.use = { ...cx.use, target: lock.id, lock: true };
       cx.target = lock;
+      cx.guaranteed = lock;
       cx.point = chestOf(lock);
     }
     if (w.skill === 'archery') {

@@ -175,6 +175,28 @@ else fail('melee attack did not hit a dummy 1.6 m ahead');
   h.tick(3);
   if (fr && diag.hp < sb) ok(`locked fireball hits the tab target (${(sb - diag.hp).toFixed(1)})`);
   else fail('locked fireball missed the tab target');
+  // Checked ranged attacks: can't hit → message and nothing spent; can hit → certain hit.
+  {
+    const pd = h.playerData.get(player.id)!;
+    pd.cooldowns = {};
+    player.mana = player.stats!.maxMana;
+    const farTarget = h.addDummy(px + 45, pz, py);
+    dummies.push(farTarget);
+    const mana0 = player.mana;
+    gameplay.onMessage(player, { t: 'ability', use: { ability: 'ignite', dir: [1, 0, 0], target: farTarget.id, lock: true } });
+    h.tick(0.5);
+    if (player.mana === mana0 && !pd.cooldowns.ignite) ok('locked spell out of range: refused, nothing spent');
+    else fail(`locked spell out of range was cast anyway (mana ${mana0} → ${player.mana})`);
+    if (gameplay.melee.rangedBlocker(player, farTarget, 20) === 'Out of range.') ok('ranged check reports "Out of range."');
+    else fail('ranged check did not report out of range');
+    pd.cooldowns = {};
+    player.mana = player.stats!.maxMana;
+    sb = diag.hp;
+    gameplay.onMessage(player, { t: 'ability', use: { ability: 'ignite', dir: [0, 0, -1], target: diag.id, lock: true } });
+    h.tick(0.5);
+    if (diag.hp < sb) ok(`locked beam (ignite) lands on the tab target (${(sb - diag.hp).toFixed(1)})`);
+    else fail('locked beam missed the tab target');
+  }
   for (const d of [side, far, diag]) h.despawn(d.id);
   player.hp = player.maxHp;
   player.stamina = player.stats!.maxStamina;

@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "assets": "tsx tools/build-human-assets.ts",
-    "test": "tsx tools/selftest.ts && tsx tools/stairs-sim.ts && tsx tools/swim-sim.ts && tsx tools/commands-check.ts"
+    "test": "tsx tools/selftest.ts && tsx tools/stairs-sim.ts && tsx tools/swim-sim.ts && tsx tools/gameplay-selftest.ts && tsx tools/commands-check.ts"
   },
   "dependencies": {
     "three": "^0.186.1"

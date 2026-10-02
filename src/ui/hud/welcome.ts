@@ -86,8 +86,8 @@ const SECTIONS: Section[] = [
       p('Magic comes in ten schools — fire, frost, earth shaping, gravity, healing, light, shadow, force, beasts and runes. Earth magic and explosions really dig and raise the ground; gravity spells change how things fall.'),
       p(...k('attack'), ' attacks with what you hold, ', ...k('block'), ' blocks. Some abilities charge while you hold their ', touch ? 'hotbar slot.' : 'key.'),
       touch
-        ? p(...k('target'), ' picks a target nearby — foes first, then the closest to your view; tap again for the next, ', touchText('targetPrev'), ' to go back, ', touchText('targetClear'), ' to let go. Swings, shots and spells then aim at it for you.')
-        : p(...k('target'), ' picks a target nearby — foes first, then the closest to your crosshair; press again for the next, ', ...k('targetPrev'), ' to go back, ', ...k('targetClear'), ' to let go. Swings, shots and spells then aim at it for you.'),
+        ? p(...k('target'), ' picks a target nearby — foes first, then the closest to your view; tap again for the next, ', touchText('targetPrev'), ' to go back, ', touchText('targetClear'), ' to let go. Swings, shots and spells then aim at it for you; ranged attacks at your target always hit, and if one cannot (out of range, no line of sight) you are told why.')
+        : p(...k('target'), ' picks a target nearby — foes first, then the closest to your crosshair; press again for the next, ', ...k('targetPrev'), ' to go back, ', ...k('targetClear'), ' to let go. Swings, shots and spells then aim at it for you; ranged attacks at your target always hit, and if one cannot (out of range, no line of sight) you are told why.'),
     ],
   },
   {
