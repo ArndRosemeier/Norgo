@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { humanAssetUrl } from '../../assets';
 import type { Character } from '../Character';
 import type { BoneMap } from './pose';
-import { Pose } from './pose';
+import { Pose, wrapPi } from './pose';
 
 interface ClipMeta { name: string; frames: number; loop: boolean; dur: number; offset: number; speed: number; sync: number }
 interface LibraryJson {
@@ -57,6 +57,12 @@ let loading: Promise<ClipLibrary | null> | null = null;
 export function clipLibrary(): ClipLibrary | null {
   if (!lib && !loading) loading = loadLibrary();
   return lib;
+}
+
+/** Resolves once the library has loaded (or failed: null). */
+export function clipLibraryReady(): Promise<ClipLibrary | null> {
+  clipLibrary();
+  return loading ?? Promise.resolve(lib);
 }
 
 async function loadLibrary(): Promise<ClipLibrary | null> {
@@ -263,15 +269,13 @@ export class ClipRig {
         if (n) _q.multiply(_q2.copy(n).invert());
         const pn = this.parentNeutral[b];
         if (pn) _q.premultiply(pn).multiply(_q2.copy(pn).invert());
-        _e.setFromQuaternion(_q, map.order[b]);
+        const ord = map.order[b];
+        _e.setFromQuaternion(_q, ord);
         const i = (f * B + b) * 3;
         rot[i] = _e.x; rot[i + 1] = _e.y; rot[i + 2] = _e.z;
-        // Unwrap against the previous frame so interpolation never spins the long way round.
-        if (f > 0) for (let k = 0; k < 3; k++) {
-          const prev = rot[i - B * 3 + k];
-          while (rot[i + k] - prev > Math.PI) rot[i + k] -= Math.PI * 2;
-          while (rot[i + k] - prev < -Math.PI) rot[i + k] += Math.PI * 2;
-        }
+        // Principal Euler solution (|middle| ≤ π/2): what procedural poses use, so clips blend
+        // with them the short way. Near gimbal lock (rolls) frames may switch branch; see
+        // accumulate().
       }
       const hi = o + S * 4;
       root[f * 3] = (d[hi] / 1000) * this.scale;
@@ -297,14 +301,17 @@ export class ClipRig {
     const r = out.rot, s = c.rot;
     for (const b of this.bones) {
       const i0 = (f0 * B + b) * 3, i1 = (f1 * B + b) * 3, j = b * 3;
-      for (let q = 0; q < 3; q++) {
-        let v1 = s[i1 + q];
-        const v0 = s[i0 + q];
-        // Loop seam: keep the pair on the same branch.
-        if (v1 - v0 > Math.PI) v1 -= Math.PI * 2;
-        else if (v1 - v0 < -Math.PI) v1 += Math.PI * 2;
-        r[j + q] += (v0 + (v1 - v0) * k) * w;
+      const d0 = wrapPi(s[i1] - s[i0]), d1 = wrapPi(s[i1 + 1] - s[i0 + 1]), d2 = wrapPi(s[i1 + 2] - s[i0 + 2]);
+      if (Math.abs(d0) + Math.abs(d1) + Math.abs(d2) > 1.2) {
+        // The two frames sit on different Euler branches (a full turn through gimbal lock):
+        // interpolating would pass through unrelated orientations, so take the nearer frame.
+        const n = k < 0.5 ? i0 : i1;
+        r[j] += s[n] * w; r[j + 1] += s[n + 1] * w; r[j + 2] += s[n + 2] * w;
+        continue;
       }
+      r[j] += (s[i0] + d0 * k) * w;
+      r[j + 1] += (s[i0 + 1] + d1 * k) * w;
+      r[j + 2] += (s[i0 + 2] + d2 * k) * w;
     }
     _v.set(c.root[f0 * 3], c.root[f0 * 3 + 1], c.root[f0 * 3 + 2]).lerp(new THREE.Vector3(c.root[f1 * 3], c.root[f1 * 3 + 1], c.root[f1 * 3 + 2]), k);
     out.root.addScaledVector(_v, w);

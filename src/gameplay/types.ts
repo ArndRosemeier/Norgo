@@ -125,6 +125,8 @@ export interface AbilityDef {
   castTime: number;
   /** Animation id for casters. */
   anim: string;
+  /** Animation length (s) when the motion needs its own time (e.g. a roll); default ≈ the strike timing. */
+  animDur?: number;
   description: string;
   icon: string;
   damage?: { amount: number; type: DamageType };

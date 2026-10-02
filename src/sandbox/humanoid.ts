@@ -16,6 +16,7 @@ import { HumanoidRig, type RigSnap } from '../humanoid/client/HumanoidRig';
 import { randomAppearance, RACES, HAIR_STYLES, BEARD_STYLES, BROW_STYLES } from '../humanoid/appearance';
 import { RACE_IDS, type HumanoidAppearance, type RaceId } from '../humanoid/types';
 import { ACTIONS } from '../humanoid/client/anim/actions';
+import { clipLibrary, clipLibraryReady } from '../humanoid/client/anim/clips';
 import type { AnimState, MoveState } from '../shared/types';
 import type { EquipmentVisuals, EquipSlot, ItemDef } from '../items/types';
 import { ITEM_DEFS as ITEMS } from '../items/data/catalog';
@@ -115,6 +116,9 @@ const state = {
   equipment: {} as EquipmentVisuals,
   /** 0 freezes animation (inspect a pose); see hsb.pose(). */
   timeScale: 1,
+  /** Library clip preview ('' = off) and its normalized time (< 0 = play). */
+  clip: Q.get('clip') ?? '',
+  clipU: -0.01,
   app: null as HumanoidAppearance | null,
 };
 let time = 0;
@@ -317,6 +321,9 @@ function buildPanel() {
     speedS.value = String(state.speed);
   });
   const speedS = slider('Speed m/s', 0, 9, state.speed, (v) => (state.speed = v));
+  // Library clip preview (anim/clips.ts): the whole body from one clip, scrubbed or playing.
+  select('Clip', ['-', ...(clipLibrary()?.clips.keys() ?? [])], state.clip || '-', (v) => (state.clip = v === '-' ? '' : v));
+  slider('Clip time', -0.01, 1, state.clipU, (v) => (state.clipU = v));
   const circ = h('input', { type: 'checkbox' });
   circ.checked = state.circle;
   circ.onchange = () => (state.circle = circ.checked);
@@ -416,6 +423,7 @@ function frame() {
       flags: state.combat ? 4 : 0,
       equipment: state.equipment,
     };
+    if (a.rig.animator) a.rig.animator.preview = state.clip ? { name: state.clip, u: state.clipU } : null;
     a.rig.update(snap, dt, time, camera.position);
     tmp.set(x, heightAt(x, z) + a.rig.height * a.rig.app.scale * 0 + a.rig.height + 0.15, z).project(camera);
     a.label.style.display = tmp.z < 1 ? '' : 'none';
@@ -441,6 +449,8 @@ function pose(id: string, p: number) {
   state.actionT0 = time - p * state.actionDur;
   setTimeout(() => (state.timeScale = 0), 120);
 }
+// The clip list fills in once the library has loaded.
+void clipLibraryReady().then(() => buildPanel());
 (window as unknown as Record<string, unknown>).hsb = { pose, THREE, scene, camera, controls, renderer, actors, state, setView, buildScene, buildPanel, randomAppearance, svc: BodyService.get() };
 if (Q.get('equip')) {
   for (const id of Q.get('equip')!.split(',')) {

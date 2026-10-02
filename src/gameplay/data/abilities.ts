@@ -282,7 +282,7 @@ export const ABILITIES: AbilityDef[] = [
 
   // =================================================================== ACROBATICS
   A('dodge_roll', 'Dodge Roll', 'acrobatics', 'self', {
-    icon: '↩', description: 'Roll in your movement direction, briefly hard to hit.', cost: { stamina: 15 }, cooldown: 1.2, anim: 'flinch', role: 'movement', tags: ['movement', 'movedir'],
+    icon: '↩', description: 'Roll in your movement direction, briefly hard to hit.', cost: { stamina: 15 }, cooldown: 1.2, anim: 'roll', animDur: 0.85, role: 'movement', tags: ['movement', 'movedir'],
     ops: [{ op: 'dash', speed: 10, dir: 'flat' }, self('phase', 1, 0.4)],
   }),
   A('leap', 'Leap', 'acrobatics', 'self', {

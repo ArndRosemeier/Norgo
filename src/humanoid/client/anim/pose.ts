@@ -48,16 +48,16 @@ export class Pose {
     this.root.copy(o.root);
     return this;
   }
-  /** this = lerp(this, o, w) (masked). */
+  /** this = lerp(this, o, w) (masked), each angle the short way round (clips may turn fully over). */
   blend(o: Pose, w: number, mask?: Float32Array) {
     if (w <= 0) return this;
     const r = this.rot, s = o.rot;
-    if (!mask) for (let i = 0; i < r.length; i++) r[i] += (s[i] - r[i]) * w;
+    if (!mask) for (let i = 0; i < r.length; i++) r[i] += wrapPi(s[i] - r[i]) * w;
     else for (let b = 0; b < this.map.count; b++) {
       const k = w * mask[b];
       if (k <= 0) continue;
       const i = b * 3;
-      r[i] += (s[i] - r[i]) * k; r[i + 1] += (s[i + 1] - r[i + 1]) * k; r[i + 2] += (s[i + 2] - r[i + 2]) * k;
+      r[i] += wrapPi(s[i] - r[i]) * k; r[i + 1] += wrapPi(s[i + 1] - r[i + 1]) * k; r[i + 2] += wrapPi(s[i + 2] - r[i + 2]) * k;
     }
     this.root.lerp(o.root, mask ? w * mask[0] : w);
     return this;
@@ -131,6 +131,8 @@ export function kf(t: number, keys: [number, number][]): number {
   return keys[keys.length - 1][1];
 }
 
+/** Angle difference folded into [−π, π]. */
+export const wrapPi = (d: number) => d - Math.round(d / (Math.PI * 2)) * Math.PI * 2;
 export const clamp = (v: number, a: number, b: number) => Math.min(b, Math.max(a, v));
 export const smooth = (a: number, b: number, x: number) => {
   const t = clamp((x - a) / (b - a), 0, 1);

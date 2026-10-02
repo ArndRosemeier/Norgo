@@ -319,7 +319,7 @@ export class AbilityRunner {
 
   private animate(caster: ServerEntity, def: AbilityDef, cx: CastCtx, castTime: number) {
     if (!def.anim) return;
-    let dur = def.kind === 'magic' ? 0.55 : 0.5;
+    let dur = def.animDur ?? (def.kind === 'magic' ? 0.55 : 0.5);
     for (const o of def.ops ?? []) if (o.op === 'strike' && o.delay) dur = Math.max(dur, o.delay + 0.3);
     caster.anim = { ...caster.anim, action: { id: def.anim, t0: this.g.ctx.time.now, dur: castTime + dur, aim: cx.dir } };
     caster.dirty = true;

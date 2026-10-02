@@ -20,7 +20,7 @@
 import * as THREE from 'three';
 import type { Character } from '../Character';
 import type { AnimState, MoveState, ActionAnim, Vec3 } from '../../../shared/types';
-import { Pose, makeBoneMap, kf, clamp, smooth, approach, type BoneMap, type Side } from './pose';
+import { Pose, makeBoneMap, kf, clamp, smooth, approach, wrapPi, type BoneMap, type Side } from './pose';
 import { ACTIONS, sitPose, type ActionCtx, type GripClass, type ActionDef } from './actions';
 import { hash32 } from '../../../core/rng';
 import { ClipRig, clipLibrary, clipSettings } from './clips';
@@ -138,6 +138,16 @@ export class Animator {
   private crouchS = 0;
   private armClip = { L: 1, R: 1 };
   private idleClipT = 0;
+  private talkS = 0;
+  private swimU = 0;
+  // Air and landing (clip families): time in the air, whether it began with a jump, landing.
+  private prevFam: Family = 'ground';
+  private airT = 0;
+  private airJump = false;
+  private landT = 9;
+  private landK = 0;
+  /** Sandbox: show this library clip on its own (u = normalized time, < 0 plays in real time). */
+  preview: { name: string; u: number } | null = null;
 
   constructor(readonly ch: Character) {
     this.map = makeBoneMap(ch.bones.map((b) => b.name));
@@ -221,6 +231,12 @@ export class Animator {
     }
     if (fam === 'dead' && this.deadT < 0) { this.deadT = 0; this.deadDir = hash32(this.seed + Math.floor(inp.time)) % 3 === 0 ? -1 : 1; }
     if (fam !== 'dead') this.deadT = -1; else this.deadT += dt;
+    if (fam === 'air' && this.prevFam !== 'air') { this.airT = 0; this.airJump = inp.vel[1] > 1; }
+    if (fam === 'air') this.airT += dt;
+    // Landing after a real fall or jump (not a stumble off a step).
+    if (fam === 'ground' && this.prevFam === 'air' && this.airT > 0.3) { this.landT = 0; this.landK = smooth(0.3, 1.0, this.airT); }
+    this.landT += dt;
+    this.prevFam = fam;
 
     // ---- velocity in character space
     const yaw = inp.yaw;
@@ -265,7 +281,13 @@ export class Animator {
       // Actions author absolute arm/spine angles over the neutral; start from base for unmasked parts.
       const mask = this.masks[def.mask];
       const actPose = this.fam.clear();
-      def.pose(actPose, t, ctx);
+      // Motion-captured clip when the action has one for this situation, else the authored pose.
+      const use = this.clipRig && clipSettings.enabled ? def.clip?.(ctx) : null;
+      const clip = use ? this.clipRig!.clip(use.name) : null;
+      if (clip) {
+        const u = def.loop ? elapsed / clip.meta.dur : (use!.from ?? 0) + ((use!.to ?? 1) - (use!.from ?? 0)) * t;
+        this.clipRig!.accumulate(clip, u, 1, actPose);
+      } else def.pose(actPose, t, ctx);
       for (let b = 0; b < this.map.count; b++) {
         const m = mask[b];
         if (m <= 0) continue;
@@ -275,7 +297,11 @@ export class Animator {
         this.act.rot[i + 1] = this.act.rot[i + 1] * (1 - m) + actPose.rot[i + 1] * m;
         this.act.rot[i + 2] = this.act.rot[i + 2] * (1 - m) + actPose.rot[i + 2] * m;
       }
-      if (def.mask === 'full') this.act.root.copy(base.root).add(actPose.root);
+      // Clips carry the absolute hips offset; authored poses add to the locomotion's.
+      if (def.mask === 'full') {
+        if (clip) this.act.root.copy(actPose.root);
+        else this.act.root.copy(base.root).add(actPose.root);
+      }
       // Blend weight with ease in/out (loops hold full weight).
       const tin = def.blendIn, tout = def.blendOut;
       let w = def.loop ? Math.min(1, elapsed / Math.max(0.05, this.lastAction!.dur * tin + 0.1)) : smooth(0, tin, t) * (1 - smooth(1 - tout, 1, t));
@@ -284,6 +310,13 @@ export class Animator {
       out.blend(this.act, w);
       if (w > 0.3) actionMood = def.mood;
     } else this.actionW = approach(this.actionW, 0, 10, dt);
+
+    // ---- sandbox clip preview (whole body from one clip)
+    const pv = this.preview && this.clipRig?.clip(this.preview.name);
+    if (pv) {
+      out.clear();
+      this.clipRig!.accumulate(pv, this.preview!.u >= 0 ? this.preview!.u : this.time / pv.meta.dur, 1, out);
+    }
 
     // ---- additive layers
     this.additives(out, inp, dt, fam);
@@ -303,6 +336,76 @@ export class Animator {
   // ------------------------------------------------------------------ families
 
   private familyPose(f: Family, p: Pose, inp: AnimInput, vf: number, vr: number, hs: number, dt: number) {
+    this.familyProcedural(f, p, inp, vf, vr, hs, dt);
+    // Clip families replace the procedural pose on the bones clips drive (cross-faded by clipOn).
+    const rig = this.clipRig;
+    if (!rig || this.clipOn < 0.002 || f === 'ground') return;
+    const c = this.clipPose.clear();
+    if (!this.familyClip(f, c, inp, hs, dt)) return;
+    const w = this.clipOn;
+    for (const b of rig.bones) {
+      const i = b * 3;
+      p.rot[i] += wrapPi(c.rot[i] - p.rot[i]) * w;
+      p.rot[i + 1] += wrapPi(c.rot[i + 1] - p.rot[i + 1]) * w;
+      p.rot[i + 2] += wrapPi(c.rot[i + 2] - p.rot[i + 2]) * w;
+    }
+    p.root.lerp(c.root, w);
+  }
+
+  /**
+   * Clip poses for swimming, sitting, the air and death (false: no clip for this family).
+   * Heights are matched to the procedural poses, which are tuned to the water line, seats and
+   * the ground.
+   */
+  private familyClip(f: Family, p: Pose, inp: AnimInput, hs: number, dt: number): boolean {
+    const rig = this.clipRig!;
+    const k = this.hipH / 0.9;
+    switch (f) {
+      case 'swim': {
+        const fwd = rig.clip('Swim_Fwd_Loop'), tread = rig.clip('Swim_Idle_Loop');
+        if (!fwd || !tread) return false;
+        const moving = smooth(0.2, 0.8, hs);
+        this.swimU += (dt / fwd.meta.dur) * (0.7 + 0.3 * Math.min(2, hs / 2.6));
+        rig.accumulate(fwd, this.swimU, moving, p);
+        rig.accumulate(tread, this.time / tread.meta.dur, 1 - moving, p);
+        p.root.y += (0.09 * moving - 0.23 * (1 - moving)) * k;
+        return true;
+      }
+      case 'sit': {
+        const idle = rig.clip('Sitting_Idle_Loop'), talk = rig.clip('Sitting_Talking_Loop');
+        if (!idle || !talk) return false;
+        this.talkS = approach(this.talkS, inp.anim.talking ? 1 : 0, 3, dt);
+        rig.accumulate(idle, this.time / idle.meta.dur, 1 - this.talkS, p);
+        rig.accumulate(talk, this.time / talk.meta.dur, this.talkS, p);
+        p.root.y -= 0.19 * k;
+        return true;
+      }
+      case 'air': {
+        const start = rig.clip('Jump_Start'), loop = rig.clip('Jump_Loop');
+        if (!start || !loop) return false;
+        // A jump plays its take-off (from the moment the feet leave the ground), then the
+        // airborne loop; falling off something goes straight to the loop.
+        const u = 0.28 + this.airT / start.meta.dur;
+        const ws = this.airJump ? 1 - smooth(0.85, 1, u) : 0;
+        if (ws > 0) rig.accumulate(start, Math.min(1, u), ws, p);
+        rig.accumulate(loop, this.airT / loop.meta.dur, 1 - ws, p);
+        // The physics moves the body; the clip's hips height would lift it off the capsule.
+        p.root.set(0, 0, 0);
+        return true;
+      }
+      case 'dead': {
+        if (inp.anim.move !== 'dead') return false; // knockdowns stay procedural (they get up)
+        const die = rig.clip('Death01');
+        if (!die) return false;
+        rig.accumulate(die, Math.max(0, this.deadT) / die.meta.dur, 1, p);
+        return true;
+      }
+      default:
+        return false;
+    }
+  }
+
+  private familyProcedural(f: Family, p: Pose, inp: AnimInput, vf: number, vr: number, hs: number, dt: number) {
     switch (f) {
       case 'ground': return this.ground(p, inp, vf, vr, hs, dt);
       case 'swim': return this.swim(p, hs, dt);
@@ -396,7 +499,10 @@ export class Animator {
     p.add('root', -(run * 0.06 + sprint * 0.1 + crouch * 0.15), 0, 0);
     p.neck(run * 0.12 + sprint * 0.12 + crouch * 0.4);
     // Clip locomotion replaces the procedural gait (arms holding something keep theirs).
-    if (gait) this.applyClipGait(p, gait.w);
+    if (gait) {
+      this.applyClipGait(p, gait.w);
+      this.landing(p, gait.w);
+    }
     // Hips toward movement direction, torso keeps facing forward.
     p.add('root', 0, -this.hipYaw, 0);
     p.spine(0, this.hipYaw * 0.85, 0);
@@ -437,11 +543,15 @@ export class Animator {
     const cIdle = rig.clip('Crouch_Idle_Loop'), cWalk = rig.clip('Crouch_Fwd_Loop');
     if (!idle || !walk || !jog || !sprint || !cIdle || !cWalk) return null;
     this.crouchS = approach(this.crouchS, crouch, 8, dt);
+    this.talkS = approach(this.talkS, inp.anim.talking ? 1 : 0, 3, dt);
+    const talkIdle = rig.clip('Idle_Talking_Loop');
     const sp = this.speed, cr = this.crouchS;
     const jogT = smooth(1.9, 3.6, sp), sprT = smooth(5.6, 7.6, sp);
     const stand = 1 - cr;
+    const talk = talkIdle ? this.talkS : 0;
     const ws = [
-      [idle, (1 - moving) * stand],
+      [idle, (1 - moving) * stand * (1 - talk)],
+      [talkIdle ?? idle, (1 - moving) * stand * talk],
       [walk, moving * (1 - jogT) * stand],
       [jog, moving * jogT * (1 - sprT) * stand],
       [sprint, moving * jogT * sprT * stand],
@@ -478,6 +588,25 @@ export class Animator {
     return { cycle, w: this.clipOn };
   }
 
+  /** Landing from a jump or fall: the landing clip's knee bend, faded out when running on. */
+  private landing(p: Pose, w: number) {
+    const T = 0.75;
+    if (this.landT >= T) return;
+    const rig = this.clipRig!, c = rig.clip('Jump_Land');
+    if (!c) return;
+    const k = w * this.landK * smooth(0, 0.06, this.landT) * (1 - smooth(0.4, T, this.landT)) * (1 - smooth(0.8, 3, this.speed));
+    if (k < 0.002) return;
+    const src = this.clipPose.clear();
+    rig.accumulate(c, 0.04 + (0.5 * this.landT) / T, 1, src);
+    for (const b of rig.bones) {
+      const i = b * 3;
+      p.rot[i] += wrapPi(src.rot[i] - p.rot[i]) * k;
+      p.rot[i + 1] += wrapPi(src.rot[i + 1] - p.rot[i + 1]) * k;
+      p.rot[i + 2] += wrapPi(src.rot[i + 2] - p.rot[i + 2]) * k;
+    }
+    p.root.lerp(src.root, k);
+  }
+
   private applyClipGait(p: Pose, w: number) {
     const rig = this.clipRig!, src = this.clipPose, armM = this.masks.arms;
     for (const b of rig.bones) {
@@ -485,9 +614,9 @@ export class Animator {
       if (armM[b] > 0) m *= this.ch.bones[b].name.endsWith('.L') ? this.armClip.L : this.armClip.R;
       if (m <= 0) continue;
       const i = b * 3;
-      p.rot[i] += (src.rot[i] - p.rot[i]) * m;
-      p.rot[i + 1] += (src.rot[i + 1] - p.rot[i + 1]) * m;
-      p.rot[i + 2] += (src.rot[i + 2] - p.rot[i + 2]) * m;
+      p.rot[i] += wrapPi(src.rot[i] - p.rot[i]) * m;
+      p.rot[i + 1] += wrapPi(src.rot[i + 1] - p.rot[i + 1]) * m;
+      p.rot[i + 2] += wrapPi(src.rot[i + 2] - p.rot[i + 2]) * m;
     }
     p.root.lerp(src.root, w);
   }

@@ -25,6 +25,16 @@ export interface ActionCtx {
   aimPitch: number;
 }
 
+/**
+ * A library clip (anim/clips.ts) that plays the action when available: the [from, to] part
+ * of the clip (normalized) is stretched over the action's duration; loops play in real time.
+ */
+export interface ClipUse {
+  name: string;
+  from?: number;
+  to?: number;
+}
+
 /** Which parts an action drives: upper (spine/arms/head), full (everything), arms only. */
 export type ActionMask = 'upper' | 'full' | 'arms' | 'rightArm' | 'face';
 
@@ -38,6 +48,8 @@ export interface ActionDef {
   mood?: string;
   /** Loops over its duration (channel, dance...). */
   loop?: boolean;
+  /** Motion-captured clip for this action (the pose function is the fallback / other variants). */
+  clip?: (c: ActionCtx) => ClipUse | null;
 }
 
 const PI = Math.PI;
@@ -391,6 +403,20 @@ function flinch(p: Pose, t: number) {
   p.leg('R', 0.15 * f, 0, 0, 0.3 * f);
 }
 
+/** Forward roll (fallback for the Roll clip): tuck, turn over the shoulders, come up. */
+function roll(p: Pose, t: number) {
+  const tuck = kf(t, [[0, 0], [0.2, 1], [0.75, 1], [1, 0]]);
+  const turn = kf(t, [[0, 0], [0.15, 0], [0.75, 1], [1, 1]]);
+  p.add('root', -PI * 2 * turn, 0, 0);
+  p.root.y -= 0.45 * tuck;
+  p.spine(-0.8 * tuck);
+  p.neck(-0.6 * tuck);
+  for (const s of ['L', 'R'] as const) {
+    p.arm(s, 1.2 * tuck, 0.3 * tuck, 0, 1.4 * tuck);
+    p.leg(s, 1.6 * tuck, 0.1 * tuck, 0, 2.2 * tuck, 0.4 * tuck);
+  }
+}
+
 function stagger(p: Pose, t: number, c: ActionCtx) {
   const f = kf(t, [[0, 0], [0.15, 1], [0.5, 0.7], [1, 0]]);
   const wob = Math.sin(c.elapsed * 9) * 0.12 * f;
@@ -405,20 +431,21 @@ function stagger(p: Pose, t: number, c: ActionCtx) {
 }
 
 export const ACTIONS: Record<string, ActionDef> = {
-  swing_1h: { mask: 'upper', blendIn: 0.05, blendOut: 0.15, pose: swing1h, mood: 'angry' },
+  // Forehand cuts use the sword clip; backhands and heavy chops stay procedural for variety.
+  swing_1h: { mask: 'upper', blendIn: 0.05, blendOut: 0.15, pose: swing1h, mood: 'angry', clip: (c) => (c.variant % 2 === 0 && c.main !== 'axe' && c.main !== 'blunt' ? { name: 'Sword_Attack', from: 0.12, to: 0.72 } : null) },
   swing_2h: { mask: 'full', blendIn: 0.05, blendOut: 0.15, pose: swing2h, mood: 'angry' },
   stab: { mask: 'full', blendIn: 0.05, blendOut: 0.15, pose: stab, mood: 'focused' },
   slam: { mask: 'full', blendIn: 0.06, blendOut: 0.15, pose: slam, mood: 'angry' },
-  punch: { mask: 'upper', blendIn: 0.05, blendOut: 0.15, pose: punch, mood: 'angry' },
+  punch: { mask: 'upper', blendIn: 0.05, blendOut: 0.15, pose: punch, mood: 'angry', clip: (c) => (c.main === 'none' ? { name: c.variant % 2 ? 'Punch_Cross' : 'Punch_Jab' } : null) },
   kick: { mask: 'full', blendIn: 0.06, blendOut: 0.15, pose: kick, mood: 'angry' },
   block: { mask: 'upper', blendIn: 0.08, blendOut: 0.1, pose: block, mood: 'focused' },
   shoot_bow: { mask: 'upper', blendIn: 0.08, blendOut: 0.12, pose: shootBow, mood: 'focused' },
   throw: { mask: 'upper', blendIn: 0.05, blendOut: 0.15, pose: throwAct },
-  cast_forward: { mask: 'upper', blendIn: 0.08, blendOut: 0.15, pose: (p, t, c) => cast(p, t, c, 'forward'), mood: 'focused' },
+  cast_forward: { mask: 'upper', blendIn: 0.08, blendOut: 0.15, pose: (p, t, c) => cast(p, t, c, 'forward'), mood: 'focused', clip: (c) => (c.main === 'none' || c.main === 'wand' ? { name: 'Spell_Simple_Shoot' } : null) },
   cast_up: { mask: 'upper', blendIn: 0.08, blendOut: 0.15, pose: (p, t, c) => cast(p, t, c, 'up'), mood: 'focused' },
   cast_ground: { mask: 'full', blendIn: 0.08, blendOut: 0.15, pose: (p, t, c) => cast(p, t, c, 'ground'), mood: 'focused' },
   cast_self: { mask: 'upper', blendIn: 0.08, blendOut: 0.15, pose: (p, t, c) => cast(p, t, c, 'self'), mood: 'focused' },
-  channel: { mask: 'upper', blendIn: 0.1, blendOut: 0.1, pose: channel, mood: 'focused', loop: true },
+  channel: { mask: 'upper', blendIn: 0.1, blendOut: 0.1, pose: channel, mood: 'focused', loop: true, clip: (c) => (c.main === 'none' || c.main === 'wand' ? { name: 'Spell_Simple_Idle_Loop' } : null) },
   dig: { mask: 'full', blendIn: 0.08, blendOut: 0.1, pose: (p, t, c) => toolStroke(p, t, c, 'dig'), mood: 'focused' },
   chop: { mask: 'upper', blendIn: 0.08, blendOut: 0.1, pose: (p, t, c) => toolStroke(p, t, c, 'chop'), mood: 'focused' },
   mine: { mask: 'upper', blendIn: 0.08, blendOut: 0.1, pose: (p, t, c) => toolStroke(p, t, c, 'mine'), mood: 'focused' },
@@ -430,15 +457,16 @@ export const ACTIONS: Record<string, ActionDef> = {
   gesture_point: { mask: 'arms', blendIn: 0.1, blendOut: 0.15, pose: point },
   gesture_shrug: { mask: 'upper', blendIn: 0.12, blendOut: 0.15, pose: shrug, mood: 'surprised' },
   bow: { mask: 'full', blendIn: 0.12, blendOut: 0.15, pose: bowAct },
-  talk: { mask: 'arms', blendIn: 0.15, blendOut: 0.15, pose: talk, loop: true },
+  talk: { mask: 'arms', blendIn: 0.15, blendOut: 0.15, pose: talk, loop: true, clip: (c) => (c.main === 'none' && c.off === 'none' ? { name: 'Idle_Talking_Loop' } : null) },
   work_hammer: { mask: 'upper', blendIn: 0.1, blendOut: 0.1, pose: (p, t, c) => toolStroke(p, t, c, 'hammer'), mood: 'focused' },
   work_saw: { mask: 'upper', blendIn: 0.1, blendOut: 0.1, pose: (p, t, c) => toolStroke(p, t, c, 'saw'), mood: 'focused' },
   pray: { mask: 'full', blendIn: 0.12, blendOut: 0.12, pose: pray, mood: 'sad' },
   sit: { mask: 'full', blendIn: 0.15, blendOut: 0.1, pose: sitAct },
   sleep: { mask: 'full', blendIn: 0.15, blendOut: 0.1, pose: () => {} },
-  dance: { mask: 'full', blendIn: 0.1, blendOut: 0.1, pose: dance, mood: 'happy', loop: true },
+  dance: { mask: 'full', blendIn: 0.1, blendOut: 0.1, pose: dance, mood: 'happy', loop: true, clip: () => ({ name: 'Dance_Loop' }) },
   cheer: { mask: 'upper', blendIn: 0.08, blendOut: 0.15, pose: cheer, mood: 'happy' },
-  flinch: { mask: 'upper', blendIn: 0.02, blendOut: 0.3, pose: flinch, mood: 'pain' },
-  stagger: { mask: 'full', blendIn: 0.03, blendOut: 0.3, pose: stagger, mood: 'pain' },
+  flinch: { mask: 'upper', blendIn: 0.02, blendOut: 0.3, pose: flinch, mood: 'pain', clip: (c) => ({ name: c.variant % 2 ? 'Hit_Head' : 'Hit_Chest' }) },
+  stagger: { mask: 'full', blendIn: 0.03, blendOut: 0.3, pose: stagger, mood: 'pain', clip: () => ({ name: 'Hit_Chest' }) },
+  roll: { mask: 'full', blendIn: 0.05, blendOut: 0.15, pose: roll, clip: () => ({ name: 'Roll', from: 0.04, to: 0.8 }) },
   die: { mask: 'full', blendIn: 0.02, blendOut: 0, pose: () => {}, mood: 'pain' },
 };
