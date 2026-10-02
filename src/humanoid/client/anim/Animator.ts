@@ -23,6 +23,7 @@ import type { AnimState, MoveState, ActionAnim, Vec3 } from '../../../shared/typ
 import { Pose, makeBoneMap, kf, clamp, smooth, approach, type BoneMap, type Side } from './pose';
 import { ACTIONS, sitPose, type ActionCtx, type GripClass, type ActionDef } from './actions';
 import { hash32 } from '../../../core/rng';
+import { ClipRig, clipLibrary, clipSettings } from './clips';
 
 export type GroundFn = (x: number, y: number, z: number) => number | null;
 
@@ -130,6 +131,13 @@ export class Animator {
   private pelvisOff = 0;
   readonly seed: number;
   private tailBones = 0;
+  // Clip locomotion (anim/clips.ts): rig once the library is loaded, blend state.
+  private clipRig: ClipRig | null = null;
+  private clipPose: Pose;
+  private clipOn = 0;
+  private crouchS = 0;
+  private armClip = { L: 1, R: 1 };
+  private idleClipT = 0;
 
   constructor(readonly ch: Character) {
     this.map = makeBoneMap(ch.bones.map((b) => b.name));
@@ -137,6 +145,7 @@ export class Animator {
     this.fam = new Pose(this.map);
     this.act = new Pose(this.map);
     this.out = new Pose(this.map);
+    this.clipPose = new Pose(this.map);
     this.seed = ch.app.seed >>> 0;
     this.idleStyle = hash32(this.seed ^ 0x1d1e) % 7;
     this.computeNeutral();
@@ -334,7 +343,9 @@ export class Animator {
     const sprint = smooth(5.2, 7.0, sp);
     // Stride (full cycle) length scales with the legs.
     const L = this.legLen;
-    const cycle = L * (crouch ? 1.15 : 1.45 + run * 1.15 + sprint * 0.6) * (0.85 + 0.15 * Math.min(1.5, sp / 1.5));
+    let cycle = L * (crouch ? 1.15 : 1.45 + run * 1.15 + sprint * 0.6) * (0.85 + 0.15 * Math.min(1.5, sp / 1.5));
+    const gait = this.clipGait(inp, crouch, moving, dt);
+    if (gait) cycle = gait.cycle;
     // Movement direction relative to facing: hips turn toward it; backpedal reverses the cycle.
     let ang = Math.atan2(vr, vf);
     let dir = 1;
@@ -384,6 +395,8 @@ export class Animator {
     p.spine(-0.06 * moving - run * 0.12 - sprint * 0.16 - crouch * 0.35, 0, 0);
     p.add('root', -(run * 0.06 + sprint * 0.1 + crouch * 0.15), 0, 0);
     p.neck(run * 0.12 + sprint * 0.12 + crouch * 0.4);
+    // Clip locomotion replaces the procedural gait (arms holding something keep theirs).
+    if (gait) this.applyClipGait(p, gait.w);
     // Hips toward movement direction, torso keeps facing forward.
     p.add('root', 0, -this.hipYaw, 0);
     p.spine(0, this.hipYaw * 0.85, 0);
@@ -392,16 +405,91 @@ export class Animator {
     const idle = 1 - moving;
     if (idle > 0.01) {
       const t = this.time;
+      // (The idle clip shifts its weight itself.)
+      const life = idle * (1 - this.clipOn);
       const shift = Math.sin(t * 0.37 + this.seed) * 0.5 + Math.sin(t * 0.13) * 0.5;
-      p.root.x += shift * 0.025 * idle;
-      p.add('root', 0, 0, -shift * 0.03 * idle);
-      p.spine(0, 0, shift * 0.04 * idle);
-      p.leg('L', 0, 0.03 * idle, -0.05 * idle, (0.06 + Math.max(0, -shift) * 0.12) * idle);
-      p.leg('R', 0, 0.03 * idle, -0.05 * idle, (0.06 + Math.max(0, shift) * 0.12) * idle);
+      p.root.x += shift * 0.025 * life;
+      p.add('root', 0, 0, -shift * 0.03 * life);
+      p.spine(0, 0, shift * 0.04 * life);
+      p.leg('L', 0, 0.03 * life, -0.05 * life, (0.06 + Math.max(0, -shift) * 0.12) * life);
+      p.leg('R', 0, 0.03 * life, -0.05 * life, (0.06 + Math.max(0, shift) * 0.12) * life);
       const combat = inp.combat && inp.main !== 'none';
       if (!combat && inp.main === 'none' && inp.off === 'none' && !crouch) this.idlePersonality(p, idle);
     }
     this.carryPose(p, inp, moving, run, crouch);
+  }
+
+  /**
+   * Clip locomotion: idle / walk / jog / sprint (or crouch idle / crouch walk) weighted by speed,
+   * all moving clips in step (normalized phase aligned on the left footfall). Accumulates the
+   * blended clip pose into clipPose; returns the blended stride length for the phase, or null
+   * while clips are off or not loaded.
+   */
+  private clipGait(inp: AnimInput, crouch: number, moving: number, dt: number): { cycle: number; w: number } | null {
+    if (!this.clipRig) {
+      const lib = clipLibrary();
+      if (lib) this.clipRig = new ClipRig(this.ch, this.map, lib, this.neutral, this.parentNeutral, this.legLen);
+    }
+    this.clipOn = approach(this.clipOn, this.clipRig && clipSettings.enabled ? 1 : 0, 4, dt);
+    const rig = this.clipRig;
+    if (!rig || this.clipOn < 0.002) return null;
+    const idle = rig.clip('Idle_Loop'), walk = rig.clip('Walk_Loop'), jog = rig.clip('Jog_Fwd_Loop'), sprint = rig.clip('Sprint_Loop');
+    const cIdle = rig.clip('Crouch_Idle_Loop'), cWalk = rig.clip('Crouch_Fwd_Loop');
+    if (!idle || !walk || !jog || !sprint || !cIdle || !cWalk) return null;
+    this.crouchS = approach(this.crouchS, crouch, 8, dt);
+    const sp = this.speed, cr = this.crouchS;
+    const jogT = smooth(1.9, 3.6, sp), sprT = smooth(5.6, 7.6, sp);
+    const stand = 1 - cr;
+    const ws = [
+      [idle, (1 - moving) * stand],
+      [walk, moving * (1 - jogT) * stand],
+      [jog, moving * jogT * (1 - sprT) * stand],
+      [sprint, moving * jogT * sprT * stand],
+      [cIdle, (1 - moving) * cr],
+      [cWalk, moving * cr],
+    ] as const;
+    // Stride of the blend (moving clips only): the phase advances by distance / stride.
+    let cyc = 0, cw = 0;
+    for (const [c, w] of ws) if (c.speed > 0.05 && w > 0) { cyc += c.cycle * w; cw += w; }
+    const cycle = cw > 1e-4 ? cyc / cw : walk.cycle;
+    // Accumulate (the phase is advanced by the caller with this cycle; one frame of lag is fine).
+    const out = this.clipPose.clear();
+    this.idleClipT += dt;
+    let sum = 0;
+    for (const [c, w] of ws) {
+      if (w < 0.002) continue;
+      // Procedural phase: left leg furthest forward at 0.25. Clip: at its sync point.
+      const u = c.speed > 0.05 ? this.phase - 0.25 + c.meta.sync : this.idleClipT / c.meta.dur;
+      rig.accumulate(c, u, w, out);
+      sum += w;
+    }
+    if (sum <= 0) return null;
+    const k = 1 / sum;
+    for (const b of rig.bones) { const i = b * 3; out.rot[i] *= k; out.rot[i + 1] *= k; out.rot[i + 2] *= k; }
+    out.root.multiplyScalar(k);
+    // Arms holding something stay procedural (carry poses are authored over the neutral).
+    const ready = inp.combat;
+    const two = inp.main === 'twohand' || inp.main === 'polearm' || inp.main === 'staff';
+    const oneHand = !two && inp.main !== 'bow' && inp.main !== 'crossbow' && inp.main !== 'torch';
+    const rFree = inp.main === 'none' || (oneHand && !ready);
+    const lFree = inp.off === 'none' && !(two && ready) && inp.main !== 'bow';
+    this.armClip.R = approach(this.armClip.R, rFree ? 1 : 0, 8, dt);
+    this.armClip.L = approach(this.armClip.L, lFree ? 1 : 0, 8, dt);
+    return { cycle, w: this.clipOn };
+  }
+
+  private applyClipGait(p: Pose, w: number) {
+    const rig = this.clipRig!, src = this.clipPose, armM = this.masks.arms;
+    for (const b of rig.bones) {
+      let m = w;
+      if (armM[b] > 0) m *= this.ch.bones[b].name.endsWith('.L') ? this.armClip.L : this.armClip.R;
+      if (m <= 0) continue;
+      const i = b * 3;
+      p.rot[i] += (src.rot[i] - p.rot[i]) * m;
+      p.rot[i + 1] += (src.rot[i + 1] - p.rot[i + 1]) * m;
+      p.rot[i + 2] += (src.rot[i + 2] - p.rot[i + 2]) * m;
+    }
+    p.root.lerp(src.root, w);
   }
 
   private idlePersonality(p: Pose, w: number) {
