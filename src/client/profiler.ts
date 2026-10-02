@@ -37,7 +37,11 @@ export interface FrameCounters {
   calls: number;
 }
 
-const JOURNAL_KEY = 'norgo.hitches';
+/** Recent journal sessions (newest last), so a test session in another tab can't wipe a real one. */
+const JOURNAL_KEY = 'norgo.hitchSessions';
+const JOURNAL_SESSIONS = 6;
+
+type JournalSession = { id: string; session: string; startedAt: string; dev: boolean; entries: HitchEntry[] };
 
 export class FrameProfiler {
   private cur = new Map<string, number>();
@@ -69,7 +73,7 @@ export class FrameProfiler {
    * kept across reloads in localStorage (`norgo.prof.hitches()`), so a bad start can be
    * diagnosed after the fact.
    */
-  readonly journal: { session: string; startedAt: string; entries: HitchEntry[] } = { session: '', startedAt: '', entries: [] };
+  readonly journal: JournalSession = { id: '', session: '', startedAt: '', dev: false, entries: [] };
   private sessionT0 = performance.now();
   private saveTimer = 0;
 
@@ -77,19 +81,34 @@ export class FrameProfiler {
   startSession(name: string) {
     this.journal.session = name;
     this.journal.startedAt = new Date().toISOString();
+    this.journal.id = `${this.journal.startedAt}#${Math.random().toString(36).slice(2, 7)}`;
+    // Dev quick-start sessions (`?quick`, `&bgtick`) are kept but not preferred when reading.
+    this.journal.dev = /[?&](quick|bgtick)(=|&|$)/.test(location.search);
     this.journal.entries.length = 0;
     this.sessionT0 = performance.now();
     this.persist();
   }
 
-  /** The journal of the current (or last) session, also readable after a reload. */
-  hitches(): { session: string; startedAt: string; entries: HitchEntry[] } {
-    if (this.journal.entries.length || this.journal.session) return this.journal;
+  /** Stored sessions, newest first (also readable after a reload or from another tab). */
+  hitchSessions(): JournalSession[] {
+    let list: JournalSession[] = [];
     try {
-      return JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? 'null') ?? this.journal;
+      list = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? '[]') as JournalSession[];
     } catch {
-      return this.journal;
+      /* storage unavailable or corrupt */
     }
+    if (this.journal.id && !list.some((x) => x.id === this.journal.id)) list.push(this.journal);
+    return list.map((x) => (x.id === this.journal.id ? this.journal : x)).reverse();
+  }
+
+  /**
+   * The journal to look at: this tab's session if it is a real game with entries, else the
+   * newest stored real (non-dev) session, else the newest of any kind.
+   */
+  hitches(): JournalSession {
+    if (this.journal.entries.length && !this.journal.dev) return this.journal;
+    const all = this.hitchSessions();
+    return all.find((x) => !x.dev && x.entries.length) ?? all.find((x) => x.entries.length) ?? this.journal;
   }
 
   private persist() {
@@ -97,7 +116,15 @@ export class FrameProfiler {
     this.saveTimer = window.setTimeout(() => {
       this.saveTimer = 0;
       try {
-        localStorage.setItem(JOURNAL_KEY, JSON.stringify(this.journal));
+        let list: JournalSession[] = [];
+        try {
+          list = JSON.parse(localStorage.getItem(JOURNAL_KEY) ?? '[]') as JournalSession[];
+        } catch {
+          list = [];
+        }
+        list = list.filter((x) => x.id !== this.journal.id);
+        list.push(this.journal);
+        localStorage.setItem(JOURNAL_KEY, JSON.stringify(list.slice(-JOURNAL_SESSIONS)));
       } catch {
         /* storage unavailable */
       }
