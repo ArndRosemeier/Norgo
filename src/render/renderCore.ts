@@ -221,13 +221,35 @@ export class ShaderGate {
    * everything compiles at once — nothing is on screen to stall).
    */
   compile(obj: THREE.Object3D, timeoutMs = 3000): Promise<void> {
-    if (!this.paced || !this.enabled) return this.compileNow(obj, timeoutMs);
+    if (!this.enabled) return this.compileNow(obj, timeoutMs);
+    if (!this.paced) {
+      // Parallel compiles still run on the driver's threads: a burst (a new settlement view plus
+      // its neighbours, a dozen programs at once) stalled ANGLE/D3D for ~0.6 s. Cap the jobs in
+      // flight; objects whose programs already exist finish at once, so the queue moves quickly.
+      return new Promise<void>((resolve) => {
+        const start = () => {
+          this.inflight++;
+          this.compileNow(obj, timeoutMs).then(() => {
+            this.inflight--;
+            resolve();
+            this.waiting.shift()?.();
+          });
+        };
+        if (this.inflight < ShaderGate.MAX_PARALLEL_JOBS) start();
+        else this.waiting.push(start);
+      });
+    }
     return new Promise<void>((resolve) => {
       this.queue.push(() => {
         this.compileNow(obj, timeoutMs).then(resolve);
       });
     });
   }
+
+  /** Concurrent compile jobs on the parallel path (see compile). */
+  static readonly MAX_PARALLEL_JOBS = 2;
+  private inflight = 0;
+  private waiting: (() => void)[] = [];
 
   /**
    * Start compiling `obj` for `scene`. Parallel: three's compileAsync polls completion.

@@ -37,6 +37,10 @@ export interface RigOptions {
 }
 
 const LOD_DIST = [11, 32];
+
+/** Cumulative main-thread cost of finishing characters, by step (diagnostics, ms). */
+export const rigBuildStats = { builds: 0, character: 0, rig: 0, add: 0, equipment: 0 };
+if (typeof window !== 'undefined') (window as unknown as { norgoRigStats?: typeof rigBuildStats }).norgoRigStats = rigBuildStats;
 const _p = new THREE.Vector3();
 
 export class HumanoidRig {
@@ -92,23 +96,41 @@ export class HumanoidRig {
 
   private finishBuild(geo: Awaited<ReturnType<BodyService['geometry']>>) {
     if (this.disposed) return;
+    const T = rigBuildStats;
+    let t = performance.now();
     const ch = new Character(geo, this.app, { castShadow: this.opts.castShadow });
+    T.character += performance.now() - t;
     this.char = ch;
+    t = performance.now();
     this.animator = new Animator(ch);
     this.equipment = new EquipmentRig(ch);
+    T.rig += performance.now() - t;
     this.height = geo.build.body.height;
-    if (this.placeholder) {
-      this.placeholder.removeFromParent();
-      this.placeholder.geometry.dispose();
-      (this.placeholder.material as THREE.Material).dispose();
-      this.placeholder = null;
-    }
+    t = performance.now();
+    // Hidden (placeholder stays) until dressed: the outfit is built piece by piece over the
+    // next frames (see EquipmentRig.set), and nobody should pop in undressed.
+    ch.object.visible = false;
     this.object.add(ch.object);
-    ch.object.visible = this.visible;
+    T.add += performance.now() - t;
     ch.setSkyVis(this.skyVis);
-    this.equipment.set(this.pendingEq);
-    this.equipment.setSkyVis(this.skyVis);
     if (this.opts.fixedLod !== undefined) ch.setLod(this.opts.fixedLod);
+    T.builds++;
+    const prio = this.opts.priority ?? 1;
+    this.equipment.set(this.pendingEq, (job) => frameWork.run(() => {
+      const t0 = performance.now();
+      job();
+      T.equipment += performance.now() - t0;
+    }, prio), () => {
+      if (this.disposed || this.char !== ch) return;
+      this.equipment?.setSkyVis(this.skyVis);
+      ch.object.visible = true;
+      if (this.placeholder) {
+        this.placeholder.removeFromParent();
+        this.placeholder.geometry.dispose();
+        (this.placeholder.material as THREE.Material).dispose();
+        this.placeholder = null;
+      }
+    });
   }
 
   /** Change appearance: recolours in place, rebuilds geometry if the shape changed. */

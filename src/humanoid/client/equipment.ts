@@ -25,7 +25,7 @@ import { resolveWearable } from '../../items/client/wearables';
 import { buildItemObject, animateItem, setItemSkyVis, disposeItemObject } from '../../items/client/ItemViews';
 import { itemDef } from '../../items/data/catalog';
 import type { Character } from './Character';
-import { BODY_REGIONS } from './staticData';
+import { BODY_REGIONS, type HumanStatic } from './staticData';
 import { createGarmentMaterial } from './garmentMaterial';
 import type { GripClass } from './anim/actions';
 import type { SkyVisPatch } from '../../render/skyOcclusion';
@@ -69,7 +69,107 @@ function shareGeometry(g: THREE.BufferGeometry, index: number[]): THREE.BufferGe
   return out;
 }
 
+/** Character-independent topology of a garment shell (see shellTopology). */
+interface ShellTopo {
+  /** Body render vertices covered by the shell (selection mask). */
+  sel: Uint8Array;
+  /** Shell vertex → body render vertex. */
+  src: number[];
+  /** Shell triangles (shell vertex indices) and the decimated LOD 1/2 triangles. */
+  idx: number[];
+  lodIdx: number[][];
+  /** 1 on the hem (boundary not welded to a seam twin). */
+  edge: Float32Array;
+  /** Neighbour lists for cloth smoothing (CSR: start offsets + flat list, duplicates kept). */
+  nbStart: Int32Array;
+  nbList: Int32Array;
+}
+
+/**
+ * Garment shell topology depends only on the covered body regions and the shared body mesh,
+ * never on the individual body shape (seam twins are co-located in every body), so it is
+ * computed once per region set and reused: building it per character (string-keyed seam
+ * welding, remap and edge maps over the whole body) cost tens of milliseconds per garment.
+ */
+const SHELL_TOPO = new Map<string, ShellTopo | null>();
+
+/** Cumulative equipment build cost by step (diagnostics, ms; window.norgoEquipStats). */
+const EQ_STATS = { held: 0, rigid: 0, shells: 0, shellCount: 0, garmentMaterial: 0 };
+if (typeof window !== 'undefined') (window as unknown as { norgoEquipStats?: typeof EQ_STATS }).norgoEquipStats = EQ_STATS;
+
+function shellTopology(st: HumanStatic, regions: ShellLayer['regions'], pos: Float32Array): ShellTopo | null {
+  const l = { regions };
+  const body = st.index.body;
+  const want = new Map<number, [number, number]>();
+  for (const r of l.regions) want.set(BODY_REGIONS.indexOf(r.region), [r.from ?? 0, r.to ?? 1]);
+  const sel = new Uint8Array(st.renderVerts);
+  for (let v = 0; v < st.bodyVerts; v++) {
+    const cut = want.get(st.region[v]);
+    if (!cut) continue;
+    const t = st.regionT[v];
+    if (t >= cut[0] - 1e-3 && t <= cut[1] + 1e-3) sel[v] = 1;
+  }
+  // Triangles fully inside the selection.
+  const tris: number[] = [];
+  for (let i = 0; i < body.length; i += 3) if (sel[body[i]] && sel[body[i + 1]] && sel[body[i + 2]]) tris.push(body[i], body[i + 1], body[i + 2]);
+  if (!tris.length) return null;
+  const remap = new Map<number, number>();
+  const src: number[] = [];
+  for (const v of tris) if (!remap.has(v)) { remap.set(v, src.length); src.push(v); }
+  // Decimated LOD triangles of the same selection (they reference a subset of the same vertices).
+  const lodTris = [1, 2].map((l) => {
+    const a = st.bodyIndex[l].array as ArrayLike<number>;
+    const out: number[] = [];
+    for (let i = 0; i < a.length; i += 3) if (remap.has(a[i]) && remap.has(a[i + 1]) && remap.has(a[i + 2])) out.push(remap.get(a[i])!, remap.get(a[i + 1])!, remap.get(a[i + 2])!);
+    return out;
+  });
+  const n = src.length;
+  // Boundary edges → trim attribute; also used to keep edges glued to the body.
+  const edgeCount = new Map<number, number>();
+  const ek = (a: number, b: number) => (a < b ? a * 65536 + b : b * 65536 + a);
+  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
+    const key = ek(tris[i + k], tris[i + ((k + 1) % 3)]);
+    edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1);
+  }
+  const edge = new Float32Array(n);
+  // Welded boundary: render vertices at UV seams are separate but co-located; treat a vertex as edge
+  // only if the boundary edge is not matched by a co-located twin (approximate via position hashing).
+  const posKey = (v: number) => `${pos[v * 3].toFixed(4)},${pos[v * 3 + 1].toFixed(4)},${pos[v * 3 + 2].toFixed(4)}`;
+  const welded = new Map<string, number>();
+  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
+    const a = tris[i + k], b = tris[i + ((k + 1) % 3)];
+    const wk = [posKey(a), posKey(b)].sort().join('|');
+    welded.set(wk, (welded.get(wk) ?? 0) + 1);
+  }
+  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
+    const a = tris[i + k], b = tris[i + ((k + 1) % 3)];
+    if (edgeCount.get(ek(a, b)) === 1 && welded.get([posKey(a), posKey(b)].sort().join('|')) === 1) {
+      edge[remap.get(a)!] = 1;
+      edge[remap.get(b)!] = 1;
+    }
+  }
+  const idx = tris.map((v) => remap.get(v)!);
+  // Neighbour lists in CSR form (same multiplicity as the per-triangle push it replaces).
+  const deg = new Int32Array(n);
+  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
+    deg[remap.get(tris[i + k])!]++;
+    deg[remap.get(tris[i + ((k + 1) % 3)])!]++;
+  }
+  const nbStart = new Int32Array(n + 1);
+  for (let i = 0; i < n; i++) nbStart[i + 1] = nbStart[i] + deg[i];
+  const fill = nbStart.slice(0, n);
+  const nbList = new Int32Array(nbStart[n]);
+  for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
+    const x = remap.get(tris[i + k])!, y = remap.get(tris[i + ((k + 1) % 3)])!;
+    nbList[fill[x]++] = y;
+    nbList[fill[y]++] = x;
+  }
+  return { sel, src, idx, lodIdx: lodTris, edge, nbStart, nbList };
+}
+
 export class EquipmentRig {
+  /** Bumped by every set(): staged jobs of an outdated outfit skip themselves. */
+  private gen = 0;
   private key = '#unset';
   private shells: ShellBuild[] = [];
   private rigids: THREE.Object3D[] = [];
@@ -84,10 +184,27 @@ export class EquipmentRig {
   constructor(private ch: Character) {}
 
   /** Apply an equipment set; rebuilds only if it changed. */
-  set(eq: EquipmentVisuals | undefined) {
+  /**
+   * Dress the character. With `schedule`, every held item, rigid part and garment shell is
+   * built as its own job (a character's outfit costs tens of milliseconds in total, a few per
+   * piece) and `done` runs after the last one; without, everything is built immediately.
+   * A newer `set` makes jobs still pending from an older one skip themselves.
+   */
+  set(eq: EquipmentVisuals | undefined, schedule?: (job: () => void) => void, done?: () => void) {
     const key = eq ? Object.entries(eq).filter(([, v]) => v).map(([k, v]) => `${k}:${v!.defId}:${v!.visual.seed}`).sort().join('|') : '';
-    if (key === this.key) return;
+    if (key === this.key) {
+      done?.();
+      return;
+    }
     this.key = key;
+    const gen = ++this.gen;
+    const run = (job: () => void) => {
+      const guarded = () => {
+        if (gen === this.gen) job();
+      };
+      if (schedule) schedule(guarded);
+      else guarded();
+    };
     this.clear();
     eq ??= {};
     const hiddenRegions = new Set<BodyRegion>();
@@ -98,7 +215,7 @@ export class EquipmentRig {
     for (const [slot, item] of Object.entries(eq) as [EquipSlot, NonNullable<EquipmentVisuals[EquipSlot]>][]) {
       if (!item) continue;
       if (slot === 'mainhand' || slot === 'offhand') {
-        this.addHeld(slot, item.defId, item.visual);
+        run(() => { const t0 = performance.now(); this.addHeld(slot, item.defId, item.visual); EQ_STATS.held += performance.now() - t0; });
         continue;
       }
       let spec: WearableSpec | null = null;
@@ -113,7 +230,7 @@ export class EquipmentRig {
       for (const r of spec.hideRegions ?? []) hiddenRegions.add(r);
       for (const l of spec.layers) {
         if (l.kind === 'shell') layers.push({ layer: l, seed: item.visual.seed });
-        else this.addRigid(l, slot, fit);
+        else run(() => { const t0 = performance.now(); this.addRigid(l, slot, fit); EQ_STATS.rigid += performance.now() - t0; });
       }
     }
     // Modest default underclothes where nothing covers hips (and chest for women).
@@ -126,8 +243,14 @@ export class EquipmentRig {
     if (this.ch.app.gender < 0.5 && !covers('chest')) layers.push({ seed: 8, layer: { kind: 'shell', regions: [{ region: 'chest', from: 0.42, to: 0.78 }, { region: 'back', from: 0.5, to: 0.72 }], offset: 0.004, layer: 0, material: under, trim: { width: 0.008, color: [dye[0] * 0.45, dye[1] * 0.45, dye[2] * 0.45] } } });
     layers.sort((a, b) => a.layer.layer - b.layer.layer);
     let order = 0;
-    for (const { layer, seed } of layers) this.addShell(layer, seed, covered, order++);
-    this.applyHidden([...hiddenRegions], hideHair, hideBeard, covered);
+    for (const { layer, seed } of layers) {
+      const o = order++;
+      run(() => { const t0 = performance.now(); this.addShell(layer, seed, covered, o); EQ_STATS.shells += performance.now() - t0; EQ_STATS.shellCount++; });
+    }
+    run(() => {
+      this.applyHidden([...hiddenRegions], hideHair, hideBeard, covered);
+      done?.();
+    });
   }
 
   // ------------------------------------------------------------------ shells
@@ -136,54 +259,16 @@ export class EquipmentRig {
     const ch = this.ch, st = ch.geo.st;
     const pos = ch.geo.build.renderPos, nrm = ch.geo.build.renderNormal;
     const body = st.index.body;
-    const want = new Map<number, [number, number]>();
-    for (const r of l.regions) want.set(BODY_REGIONS.indexOf(r.region), [r.from ?? 0, r.to ?? 1]);
-    const sel = new Uint8Array(st.renderVerts);
-    for (let v = 0; v < st.bodyVerts; v++) {
-      const cut = want.get(st.region[v]);
-      if (!cut) continue;
-      const t = st.regionT[v];
-      if (t >= cut[0] - 1e-3 && t <= cut[1] + 1e-3) sel[v] = 1;
+    const topoKey = JSON.stringify(l.regions);
+    let topo = SHELL_TOPO.get(topoKey);
+    if (topo === undefined) {
+      topo = shellTopology(st, l.regions, pos);
+      SHELL_TOPO.set(topoKey, topo);
     }
-    // Triangles fully inside the selection.
-    const tris: number[] = [];
-    for (let i = 0; i < body.length; i += 3) if (sel[body[i]] && sel[body[i + 1]] && sel[body[i + 2]]) tris.push(body[i], body[i + 1], body[i + 2]);
-    if (!tris.length && !l.skirt && !l.hood) return;
-    const remap = new Map<number, number>();
-    const src: number[] = [];
-    for (const v of tris) if (!remap.has(v)) { remap.set(v, src.length); src.push(v); }
-    // Decimated LOD triangles of the same selection (they reference a subset of the same vertices).
-    const lodTris = [1, 2].map((l) => {
-      const a = st.bodyIndex[l].array as ArrayLike<number>;
-      const out: number[] = [];
-      for (let i = 0; i < a.length; i += 3) if (remap.has(a[i]) && remap.has(a[i + 1]) && remap.has(a[i + 2])) out.push(remap.get(a[i])!, remap.get(a[i + 1])!, remap.get(a[i + 2])!);
-      return out;
-    });
+    if (!topo && !l.skirt && !l.hood) return;
+    const empty: ShellTopo = { sel: new Uint8Array(st.renderVerts), src: [], idx: [], lodIdx: [[], []], edge: new Float32Array(0), nbStart: new Int32Array(1), nbList: new Int32Array(0) };
+    const { sel, src, edge, nbStart, nbList } = topo ?? empty;
     const n = src.length;
-    // Boundary edges → trim attribute; also used to keep edges glued to the body.
-    const edgeCount = new Map<number, number>();
-    const ek = (a: number, b: number) => (a < b ? a * 65536 + b : b * 65536 + a);
-    for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
-      const key = ek(tris[i + k], tris[i + ((k + 1) % 3)]);
-      edgeCount.set(key, (edgeCount.get(key) ?? 0) + 1);
-    }
-    const edge = new Float32Array(n);
-    // Welded boundary: render vertices at UV seams are separate but co-located; treat a vertex as edge
-    // only if the boundary edge is not matched by a co-located twin (approximate via position hashing).
-    const posKey = (v: number) => `${pos[v * 3].toFixed(4)},${pos[v * 3 + 1].toFixed(4)},${pos[v * 3 + 2].toFixed(4)}`;
-    const welded = new Map<string, number>();
-    for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
-      const a = tris[i + k], b = tris[i + ((k + 1) % 3)];
-      const wk = [posKey(a), posKey(b)].sort().join('|');
-      welded.set(wk, (welded.get(wk) ?? 0) + 1);
-    }
-    for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
-      const a = tris[i + k], b = tris[i + ((k + 1) % 3)];
-      if (edgeCount.get(ek(a, b)) === 1 && welded.get([posKey(a), posKey(b)].sort().join('|')) === 1) {
-        edge[remap.get(a)!] = 1;
-        edge[remap.get(b)!] = 1;
-      }
-    }
     // Positions: push out along the normal; outer layers are smoothed (cloth drapes over detail).
     const off = Math.max(0.002, l.offset) + order * 0.0015;
     const P = new Float32Array(n * 3), N = new Float32Array(n * 3);
@@ -199,18 +284,14 @@ export class EquipmentRig {
     const footShell = l.regions.some((r) => r.region.startsWith('foot'));
     const smoothIters = Math.max(l.offset >= 0.012 ? 5 : l.offset >= 0.006 ? 3 : 2, footShell ? 10 : 0);
     if (smoothIters) {
-      const nb: number[][] = Array.from({ length: n }, () => []);
-      for (let i = 0; i < tris.length; i += 3) for (let k = 0; k < 3; k++) {
-        const a = remap.get(tris[i + k])!, b = remap.get(tris[i + ((k + 1) % 3)])!;
-        nb[a].push(b); nb[b].push(a);
-      }
       const tmp = new Float32Array(P.length);
       for (let it = 0; it < smoothIters; it++) {
         for (let i = 0; i < n; i++) {
-          if (edge[i] || !nb[i].length) { tmp.set(P.subarray(i * 3, i * 3 + 3), i * 3); continue; }
+          const s0 = nbStart[i], s1 = nbStart[i + 1];
+          if (edge[i] || s1 === s0) { tmp.set(P.subarray(i * 3, i * 3 + 3), i * 3); continue; }
           let x = 0, y = 0, z = 0;
-          for (const j of nb[i]) { x += P[j * 3]; y += P[j * 3 + 1]; z += P[j * 3 + 2]; }
-          const c = 1 / nb[i].length;
+          for (let q = s0; q < s1; q++) { const j = nbList[q]; x += P[j * 3]; y += P[j * 3 + 1]; z += P[j * 3 + 2]; }
+          const c = 1 / (s1 - s0);
           tmp[i * 3] = P[i * 3] * 0.4 + x * c * 0.6;
           tmp[i * 3 + 1] = P[i * 3 + 1] * 0.4 + y * c * 0.6;
           tmp[i * 3 + 2] = P[i * 3 + 2] * 0.4 + z * c * 0.6;
@@ -237,7 +318,7 @@ export class EquipmentRig {
       for (let k = 0; k < 4; k++) { si[i * 4 + k] = ssi[v * 4 + k]; sw[i * 4 + k] = ssw[v * 4 + k]; }
       if (sel[v]) covered[v] = 1;
     }
-    let idx = tris.map((v) => remap.get(v)!);
+    let idx = (topo?.idx ?? []).slice();
     const parts: { P: number[]; N: number[]; UV: number[]; SI: number[]; SW: number[]; E: number[]; I: number[] } = { P: [], N: [], UV: [], SI: [], SW: [], E: [], I: [] };
     if (l.skirt) this.buildSkirt(l, parts, n);
     if (l.hood) this.buildHood(parts, n);
@@ -255,7 +336,9 @@ export class EquipmentRig {
     g.setIndex(idx);
     g.boundingSphere = ch.geo.body[0].boundingSphere!.clone();
     if (parts.P.length) g.computeVertexNormals();
+    const tm = performance.now();
     const mat = createGarmentMaterial(l.material, seed, l.trim?.color);
+    EQ_STATS.garmentMaterial += performance.now() - tm;
     if (l.skirt || l.hood) mat.material.side = THREE.DoubleSide;
     const mesh = new THREE.SkinnedMesh(g, mat.material);
     mesh.bind(ch.skeleton, new THREE.Matrix4());
@@ -269,7 +352,7 @@ export class EquipmentRig {
     for (const l of [1, 2]) {
       const gl = new THREE.BufferGeometry();
       for (const [name, attr] of Object.entries(g.attributes)) gl.setAttribute(name, attr);
-      gl.setIndex(lodTris[l - 1].concat(parts.I));
+      gl.setIndex((topo?.lodIdx[l - 1] ?? []).concat(parts.I));
       gl.boundingSphere = g.boundingSphere;
       const far = new THREE.SkinnedMesh(gl, mat.material);
       far.bind(ch.skeleton, new THREE.Matrix4());
